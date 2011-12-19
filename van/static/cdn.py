@@ -69,6 +69,28 @@ def export(resources, target, yui_compressor=True, **kw):
         if comp is not None:
             comp.dispose()
 
+def config_static(config, static_resources, static_cdn=None):
+    """Configure a Pyramid application with a list of static resources.
+
+    If static_cdn is None, the resource will be configured to use the local
+    server. Ideal for development.
+
+    If static_cdn is a URL, resources will be loaded from there under this
+    schema:
+
+        http://cdn.example.com/some/path/${package_name}/${package_version}/path/within/pacakage
+    """
+    if static_cdn is None:
+        for name, path in static_resources:
+            assert ':' in path, 'Is not relative to a package: %r' % path
+            config.add_static_view(name=name, path=path)
+    else:
+        for name, path in static_resources:
+            pname, filepath = path.split(':', 1)
+            dist = get_distribution(pname)
+            name = '/'.join([static_cdn, dist.project_name, dist.version, filepath])
+            config.add_static_view(name=name, path=path)
+
 def _walk_resource_directory(pname, resource_directory):
     """Walk a resource directory and yield all files.
 
