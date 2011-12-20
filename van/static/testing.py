@@ -12,7 +12,7 @@ except ImportError:
 except NotImplementedError:
     pass
 
-def assert_jslint_dir(testcase, path, failfast=False):
+def assert_jslint_dir(path, failfast=False):
     """Run jslint on all .js files under path.
 
     return True or raises an AssertionError if any file fails.
