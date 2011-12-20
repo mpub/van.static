@@ -7,7 +7,7 @@ import urlparse
 
 from pkg_resources import get_distribution, resource_listdir, resource_isdir, resource_filename
 
-def export_cmd(resources=None, target=None, yui_compressor=False):
+def extract_cmd(resources=None, target=None, yui_compressor=False):
     """Export from the command line"""
     parser = optparse.OptionParser(usage="usage: %prog [options]")
     res_help = "Resource to dump (may be repeated)."
@@ -49,9 +49,9 @@ def export_cmd(resources=None, target=None, yui_compressor=False):
     if options.aws_secret_key:
         kw['aws_secret_key'] = options.aws_secret_key
     assert len(args) == 0
-    export(options.resources, options.target, options.yui_compressor, **kw)
+    extract(options.resources, options.target, options.yui_compressor, **kw)
 
-def export(resources, target, yui_compressor=True, **kw):
+def extract(resources, target, yui_compressor=True, **kw):
     """Export the resources"""
     r_files = _walk_resources(resources)
     comp = None
@@ -201,4 +201,4 @@ class _YUICompressor:
             yield rpath, target, pname, dist
 
 if __name__ == "__main__":
-    export_cmd()
+    extract_cmd()
