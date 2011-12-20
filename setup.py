@@ -27,14 +27,14 @@ setup(name="van.static",
       install_requires = [
           'setuptools',
           ],
-    classifiers=[
-        'Environment :: Web Environment',
-        'Intended Audience :: Developers',
-        'License :: OSI Approved :: BSD License',
-        'Programming Language :: Python',
-        'Topic :: Internet :: WWW/HTTP',
-        'Development Status :: 2 - Pre-Alpha',
-        'Framework :: Pylons', # actually pyramid, but that's part of pylons
-        ],
+      classifiers=[
+          'Environment :: Web Environment',
+          'Intended Audience :: Developers',
+          'License :: OSI Approved :: BSD License',
+          'Programming Language :: Python',
+          'Topic :: Internet :: WWW/HTTP',
+          'Development Status :: 2 - Pre-Alpha',
+          'Framework :: Pylons', # actually pyramid, but that's part of pylons
+          ],
       include_package_data = True,
       )
