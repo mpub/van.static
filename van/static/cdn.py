@@ -3,6 +3,7 @@ import shutil
 import logging
 import optparse
 import tempfile
+import subprocess
 import urlparse
 
 from pkg_resources import get_distribution, resource_listdir, resource_isdir, resource_filename
@@ -185,20 +186,21 @@ class _YUICompressor:
     def __del__(self):
         self.dispose()
 
-    def compress(files):
-        for rpath, fs_rpath, pname, dist, in files:
+    def compress(self, files):
+        for rpath, fs_rpath, pname, dist, f_type in files:
             if rpath.endswith('.js'):
                 type = 'js'
             elif rpath.endswith('.css'):
                 type = 'css'
             else:
-                yield rpath, fs_rpath, pname, dist
+                yield rpath, fs_rpath, pname, dist, f_type
+                continue
             self._counter += 1
-            target = os.path.join(tmpdir, str(self._counter) + '-' + os.path.basename(fs_rpath))
+            target = os.path.join(self._tmpdir, str(self._counter) + '-' + os.path.basename(fs_rpath))
             args = ['yui-compressor', '--type', type, '-o', target, fs_rpath]
-            logging.debug('Compressing with YUI Compressor %s file, from %s to %s', type, in_filename, target)
+            logging.debug('Compressing with YUI Compressor %s file, from %s to %s', type, fs_rpath, target)
             subprocess.check_call(args)
-            yield rpath, target, pname, dist
+            yield rpath, target, pname, dist, f_type
 
 if __name__ == "__main__":
     extract_cmd()
