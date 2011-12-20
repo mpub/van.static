@@ -23,6 +23,7 @@ setup(name="van.static",
       packages=find_packages(),
       author="Vanguardistas LLC",
       description="Tools for managing Pyramid static files on a CDN",
+      test_suite="van.static.tests",
       namespace_packages=["van"],
       install_requires = [
           'setuptools',
