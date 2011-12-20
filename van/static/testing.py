@@ -21,6 +21,8 @@ def assert_jslint_dir(testcase, path, failfast=False):
     checking.
     """
     messages, files = jslint_dir(path, failfast)
+    if not files:
+        raise AssertionError("Did not find any Javascript files to check (i.e. with a .js suffix)")
     if not messages:
         return True
     messages = sorted([(m['file'], m) for m in messages])
