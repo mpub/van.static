@@ -73,8 +73,9 @@ def _check_running(running):
         ret = p.poll()
         if ret is not None:
             del running[file]
-            if p.returncode != 0:
-                output.seek(0)
-                messages.append(dict(file=file, stdout=output.read()))
+            output.seek(0)
+            result = output.read()
+            if result.strip() != 'No error found': # cant trust the returncode :(
+                messages.append(dict(file=file, stdout=result))
             output.close()
     return messages
