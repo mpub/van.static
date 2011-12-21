@@ -34,7 +34,7 @@ setup(name="van.static",
           'License :: OSI Approved :: BSD License',
           'Programming Language :: Python',
           'Topic :: Internet :: WWW/HTTP',
-          'Development Status :: 2 - Pre-Alpha',
+          'Development Status :: 3 - Alpha',
           'Framework :: Pylons', # actually pyramid, but that's part of pylons
           ],
       include_package_data = True,
