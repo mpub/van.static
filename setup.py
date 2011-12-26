@@ -25,6 +25,7 @@ setup(name="van.static",
       description="Tools for managing Pyramid static files on a CDN",
       test_suite="van.static.tests",
       namespace_packages=["van"],
+      tests_require = ['mock'],
       install_requires = [
           'setuptools',
           ],

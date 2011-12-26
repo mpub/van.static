@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import logging
 import optparse
@@ -8,7 +9,7 @@ import urlparse
 
 from pkg_resources import get_distribution, resource_listdir, resource_isdir, resource_filename
 
-def extract_cmd(resources=None, target=None, yui_compressor=False):
+def extract_cmd(resources=None, target=None, yui_compressor=False, args=sys.argv):
     """Export from the command line"""
     parser = optparse.OptionParser(usage="usage: %prog [options]")
     res_help = "Resource to dump (may be repeated)."
@@ -34,7 +35,7 @@ def extract_cmd(resources=None, target=None, yui_compressor=False):
     parser.set_defaults(
             yui_compressor=yui_compressor,
             target=target)
-    options, args = parser.parse_args()
+    options, args = parser.parse_args(args)
     if not options.resources:
         # set our default
         options.resources = resources
@@ -49,18 +50,14 @@ def extract_cmd(resources=None, target=None, yui_compressor=False):
         kw['aws_access_key'] = options.aws_access_key
     if options.aws_secret_key:
         kw['aws_secret_key'] = options.aws_secret_key
-    assert len(args) == 0
+    assert len(args) == 1, args
     extract(options.resources, options.target, options.yui_compressor, **kw)
 
 def extract(resources, target, yui_compressor=True, **kw):
     """Export the resources"""
     r_files = _walk_resources(resources)
+    putter = _get_putter(target, **kw)
     comp = None
-    schema = target.split(':')[0]
-    putter = {
-            'file': _PutLocal,
-            's3': _PutS3}[schema]
-    putter = putter(target, **kw)
     try:
         if yui_compressor:
             comp = _YUICompressor()
@@ -69,6 +66,13 @@ def extract(resources, target, yui_compressor=True, **kw):
     finally:
         if comp is not None:
             comp.dispose()
+
+def _get_putter(target, **kw):
+    schema = target.split(':')[0]
+    putter = {
+            'file': _PutLocal,
+            's3': _PutS3}[schema]
+    return putter(target, **kw)
 
 def config_static(config, static_resources, static_cdn=None):
     """Configure a Pyramid application with a list of static resources.
@@ -99,6 +103,8 @@ def _walk_resource_directory(pname, resource_directory):
     """
     yield resource_directory, 'dir'
     for member in resource_listdir(pname, resource_directory):
+        if member.startswith('.'):
+            continue
         r_path = '/'.join([resource_directory, member])
         if resource_isdir(pname, r_path):
             logging.info("_walk_resource_directory: Recursing into directory %s:%s", pname, r_path)
@@ -146,30 +152,36 @@ class _PutLocal:
 class _PutS3:
 
     def __init__(self, target, aws_access_key=None, aws_secret_key=None):
-        # lazy import to not have a hard dependency on boto
-        from boto.s3.connection import S3Connection
-        from boto.s3.key import Key
         target = urlparse.urlparse(target)
         assert target.scheme == 's3'
-        self._Key = Key
-        conn = S3Connection(aws_access_key, aws_secret_key)
-        self._bucket = conn.get_bucket(target.netloc)
-        self._target_path = target.path
+        self._target = target
+        self._aws_access_key = aws_access_key
+        self._aws_secret_key = aws_secret_key
+
+    def _get_imports(self):
+        # lazy import to not have a hard dependency on boto
+        # Also so we can mock them in tests
+        from boto.s3.connection import S3Connection
+        from boto.s3.key import Key
+        return S3Connection, Key
 
     def put(self, files):
+        S3Connection, Key = self._get_imports()
+        self._target.path
+        conn = S3Connection(self._aws_access_key, self._aws_secret_key)
+        bucket = conn.get_bucket(self._target.netloc)
         for rpath, fs_rpath, pname, dist, type in files:
             if type == 'dir':
                 continue
             logging.debug("putting to S3: %s", (rpath, fs_rpath, pname, dist, type))
-            target = '/'.join([self._target_path, dist.project_name, dist.version, rpath])
-            key = self._Key(self._bucket)
+            target = '/'.join([self._target.path, dist.project_name, dist.version, rpath])
+            key = Key(bucket)
             key.key = target
             key.set_contents_from_filename(
                     fs_rpath,
                     reduced_redundancy=True,
                     headers={'Cache-Control': 'max-age=32140800'},
-                    policy='public-read',
-                    )
+                    policy='public-read')
 
 class _YUICompressor:
 
@@ -188,9 +200,9 @@ class _YUICompressor:
 
     def compress(self, files):
         for rpath, fs_rpath, pname, dist, f_type in files:
-            if rpath.endswith('.js'):
+            if f_type == 'file' and rpath.endswith('.js'):
                 type = 'js'
-            elif rpath.endswith('.css'):
+            elif f_type == 'file' and rpath.endswith('.css'):
                 type = 'css'
             else:
                 yield rpath, fs_rpath, pname, dist, f_type
