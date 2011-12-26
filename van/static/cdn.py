@@ -5,7 +5,6 @@ import logging
 import optparse
 import tempfile
 import subprocess
-import urlparse
 
 from pkg_resources import get_distribution, resource_listdir, resource_isdir, resource_filename
 
@@ -152,9 +151,12 @@ class _PutLocal:
 class _PutS3:
 
     def __init__(self, target, aws_access_key=None, aws_secret_key=None):
-        target = urlparse.urlparse(target)
-        assert target.scheme == 's3'
-        self._target = target
+        # parse URL by hand as urlparse in python2.5 doesn't
+        assert target.startswith('s3://')
+        target = target[5:]
+        bucket, path = target.split('/', 1)
+        self._bucket = bucket
+        self._path = '/%s' % path
         self._aws_access_key = aws_access_key
         self._aws_secret_key = aws_secret_key
 
@@ -167,14 +169,13 @@ class _PutS3:
 
     def put(self, files):
         S3Connection, Key = self._get_imports()
-        self._target.path
         conn = S3Connection(self._aws_access_key, self._aws_secret_key)
-        bucket = conn.get_bucket(self._target.netloc)
+        bucket = conn.get_bucket(self._bucket)
         for rpath, fs_rpath, pname, dist, type in files:
             if type == 'dir':
                 continue
             logging.debug("putting to S3: %s", (rpath, fs_rpath, pname, dist, type))
-            target = '/'.join([self._target.path, dist.project_name, dist.version, rpath])
+            target = '/'.join([self._path, dist.project_name, dist.version, rpath])
             key = Key(bucket)
             key.key = target
             key.set_contents_from_filename(

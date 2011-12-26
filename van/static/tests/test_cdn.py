@@ -213,9 +213,11 @@ class TestPutLocal(TestCase):
         self.assertEqual(os.listdir(d), ['example'])
         d = os.path.join(d, 'example')
         self.assertEqual(os.listdir(d), ['css', 'example.txt'])
-        self.assertEquals(
-                open(os.path.join(d, 'example.txt'), 'r').read(),
+        f = open(os.path.join(d, 'example.txt'), 'r')
+        self.assertEqual(
+                f.read(),
                 'Example Text\n')
+        f.close()
         d = os.path.join(d, 'css')
         self.assertEqual(os.listdir(d), ['example.css'])
 
@@ -287,7 +289,7 @@ class TestYUICompressor(TestCase):
         dist = get_distribution('van.static')
         input =[('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
                 ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file')]
-        self.assertEquals(list(self.one.compress(iter(input))), input)
+        self.assertEqual(list(self.one.compress(iter(input))), input)
         self.assertFalse(subprocess.check_call.called)
 
     @patch('van.static.cdn.subprocess')
@@ -335,8 +337,10 @@ class TestFunctional(TestCase):
         self.assertEqual(os.listdir(d), ['example'])
         d = os.path.join(d, 'example')
         self.assertEqual(sorted(os.listdir(d)), ['css', 'example.txt', 'js'])
-        self.assertEquals(
-                open(os.path.join(d, 'example.txt'), 'r').read(),
+        f = open(os.path.join(d, 'example.txt'), 'r')
+        self.assertEqual(
+                f.read(),
                 'Example Text\n')
+        f.close()
         d = os.path.join(d, 'css')
         self.assertEqual(os.listdir(d), ['example.css'])
