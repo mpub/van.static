@@ -15,9 +15,14 @@
 import os
 from setuptools import setup, find_packages
 
+f = open('README.rst', 'r')
+long_description = f.read()
+f.close()
+
 setup(name="van.static",
       version='0.1',
       license='BSD-derived',
+      long_description=long_description,
       url='http://pypi.python.org/pypi/van.static',
       author_email='brian@vanguardistas.net',
       packages=find_packages(),
