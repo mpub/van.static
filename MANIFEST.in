@@ -1,0 +1,3 @@
+include README.rst LICENSE.txt
+include van/static/tests/example/.unix_ignored
+recursive-include van/static/tests/example *.css *.txt *.js
