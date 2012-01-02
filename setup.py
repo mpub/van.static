@@ -20,7 +20,7 @@ long_description = f.read()
 f.close()
 
 setup(name="van.static",
-      version='0.2',
+      version='0.3',
       license='BSD-derived',
       long_description=long_description,
       url='http://pypi.python.org/pypi/van.static',
@@ -45,7 +45,7 @@ setup(name="van.static",
           'License :: OSI Approved :: BSD License',
           'Programming Language :: Python',
           'Topic :: Internet :: WWW/HTTP',
-          'Development Status :: 3 - Alpha',
+          'Development Status :: 4 - Beta',
           'Framework :: Pylons', # actually pyramid, but that's part of pylons
           ],
       include_package_data = True,
