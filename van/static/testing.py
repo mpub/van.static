@@ -51,7 +51,7 @@ def jslint_dir(path, failfast):
         running[next] = p, output
         if len(running) == MAX_PROCS:
             # just wait till one of the processes is finished
-            running.values()[0].wait()
+            running.values()[0][0].wait()
         messages.extend(_check_running(running))
         assert len(running) <= MAX_PROCS
     for p, _ in running.values():
