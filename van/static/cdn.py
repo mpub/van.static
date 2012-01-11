@@ -170,7 +170,7 @@ class _PutS3:
     def put(self, files):
         S3Connection, Key = self._get_imports()
         conn = S3Connection(self._aws_access_key, self._aws_secret_key)
-        bucket = conn.get_bucket(self._bucket)
+        bucket = conn.get_bucket(self._bucket, validate=False)
         for rpath, fs_rpath, pname, dist, type in files:
             if type == 'dir':
                 continue
