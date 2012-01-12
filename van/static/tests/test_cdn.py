@@ -248,7 +248,7 @@ class TestPutS3(TestCase):
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
             ])
         conn.assert_called_once_with('key', 'secret')
-        conn().get_bucket.assert_called_once_with('mybucket')
+        conn().get_bucket.assert_called_once_with('mybucket', validate=False)
         bucket = conn().get_bucket()
         self.assertEqual(key.call_args_list, [
             ((bucket, ), ),
