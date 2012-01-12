@@ -189,6 +189,25 @@ class TestPutLocal(TestCase):
         import shutil
         shutil.rmtree(self._tmpdir)
 
+    def test_put_twice(self):
+        # we can put to local twice without issue
+        # https://github.com/jinty/van.static/issues/1
+        here = os.path.dirname(__file__)
+        target_url = 'file://%s' % self._tmpdir
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        here = os.path.dirname(__file__)
+        from van.static.cdn import _PutLocal
+        putter = _PutLocal(target_url)
+        to_put = [
+            ('tests/example', here + '/example', 'van.static', dist, 'dir'),
+            ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
+            ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
+            ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
+            ]
+        putter.put(to_put)
+        putter.put(to_put)
+
     def test_put(self):
         here = os.path.dirname(__file__)
         target_url = 'file://%s' % self._tmpdir

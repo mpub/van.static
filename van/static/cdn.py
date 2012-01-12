@@ -130,23 +130,33 @@ class _PutLocal:
         self._target_dir = target = target[7:]
         logging.info("Putting resources in %s", self._target_dir)
 
+    def _if_not_exist(self, func, *args, **kw):
+        # call for file operations that may fail with
+        #   OSError: [Errno 17] File exists
+        try:
+            func(*args, **kw)
+        except OSError:
+            e = sys.exc_info()[1]
+            if e.errno != 17:
+                raise
+
     def put(self, files):
         proj_dirs = set([])
         for rpath, fs_rpath, pname, dist, type in files:
             fs_path = rpath.replace('/', os.sep) # enough for windows?
             target = os.path.join(self._target_dir, dist.project_name, dist.version, fs_path)
             if pname not in proj_dirs:
-                os.mkdir(os.path.join(self._target_dir, dist.project_name))
-                os.mkdir(os.path.join(self._target_dir, dist.project_name, dist.version))
+                self._if_not_exist(os.makedirs, os.path.join(self._target_dir, dist.project_name, dist.version))
                 proj_dirs.add(pname)
             if type == 'file':
                 self._copy(fs_rpath, target)
             else:
-                os.makedirs(target)
+                self._if_not_exist(os.makedirs, target)
 
     def _copy(self, source, target):
         logging.debug("Hard linking %s to %s", source, target)
-        os.link(source, target) # hard links are fast!
+        self._if_not_exist(os.link, source, target) # hard links are fast!
+
 
 class _PutS3:
 
