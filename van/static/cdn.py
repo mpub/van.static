@@ -145,6 +145,8 @@ def _walk_resources(resources):
 
 class _PutLocal:
 
+    _hard_link = True
+
     def __init__(self, target):
         assert target.startswith('file:///')
         self._target_dir = target = target[7:]
@@ -177,16 +179,19 @@ class _PutLocal:
                 self._if_not_exist(os.makedirs, target)
 
     def _copy(self, source, target):
-        # If source and target is on the same device, use shutil.copy
-        if os.stat(os.path.dirname(target)).st_dev == os.stat(source).st_dev:
-            logging.debug("Hard linking %s to %s", source, target)
-            copy_function = os.link
-        # Otherwise use os.link and create a hard link
+        if self._hard_link:
+            try:
+                logging.debug("Hard linking %s to %s", source, target)
+                self._if_not_exist(os.link, source, target) # hard links are fast!
+            except:
+                logging.debug("Hard linking failed, falling back to normal copy")
+                # don't try hard linking after first failure
+                # this may be because the files are on differnt devices or windows
+                self._hard_link = False
+                self._copy(source, target)
         else:
             logging.debug("Copying %s to %s", source, target)
-            copy_function = shutil.copy
-
-        self._if_not_exist(copy_function, source, target)
+            self._if_not_exist(shutil.copy, source, target) # hard links are fast!
 
 
 class _PutS3:

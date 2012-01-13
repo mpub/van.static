@@ -179,7 +179,7 @@ class TestWalkResources(TestCase):
             ])
 
 
-class TestPutLocal(TestCase):
+class TestPutLocalMixin:
 
     def setUp(self):
         import tempfile
@@ -189,34 +189,33 @@ class TestPutLocal(TestCase):
         import shutil
         shutil.rmtree(self._tmpdir)
 
+    def make_one(self):
+        target_url = 'file://%s' % self._tmpdir
+        from van.static.cdn import _PutLocal
+        return _PutLocal(target_url)
+
     def test_put_twice(self):
         # we can put to local twice without issue
         # https://github.com/jinty/van.static/issues/1
         here = os.path.dirname(__file__)
-        target_url = 'file://%s' % self._tmpdir
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
-        here = os.path.dirname(__file__)
-        from van.static.cdn import _PutLocal
-        putter = _PutLocal(target_url)
+        one = self.make_one()
         to_put = [
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
             ]
-        putter.put(to_put)
-        putter.put(to_put)
+        one.put(to_put)
+        one.put(to_put)
 
     def test_put(self):
         here = os.path.dirname(__file__)
-        target_url = 'file://%s' % self._tmpdir
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
-        here = os.path.dirname(__file__)
-        from van.static.cdn import _PutLocal
-        putter = _PutLocal(target_url)
-        putter.put([
+        one = self.make_one()
+        one.put([
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
@@ -239,6 +238,43 @@ class TestPutLocal(TestCase):
         f.close()
         d = os.path.join(d, 'css')
         self.assertEqual(os.listdir(d), ['example.css'])
+
+
+class TestPutLocal(TestPutLocalMixin, TestCase):
+
+    @patch('os.link')
+    @patch('shutil.copy')
+    def test_fallback_to_copy(self, copy, link):
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        one = self.make_one()
+        to_put = [
+            ('tests/example/css/example.css', '/example/css/example.css', 'van.static', dist, 'file'),
+            ('tests/example/example.txt', '/example/example.txt', 'van.static', dist, 'file'),
+            ]
+        # if link never fails it gets called twice
+        self.assertTrue(one._hard_link)
+        one.put(to_put)
+        self.assertTrue(one._hard_link)
+        self.assertEqual(link.call_count, 2)
+        self.assertEqual(copy.call_count, 0)
+        # if link now fails, we fall back to copy
+        link.reset_mock()
+        link.side_effect = Exception('boom')
+        one.put(to_put)
+        self.assertFalse(one._hard_link)
+        self.assertEqual(link.call_count, 1)
+        self.assertEqual(copy.call_count, 2)
+
+
+class TestPutLocalNoHardlink(TestPutLocalMixin, TestCase):
+    """Run all TestPutLocalMixin tests with hard linking disabled"""
+
+    def make_one(self):
+        one = TestPutLocalMixin.make_one(self)
+        self.assertTrue(one._hard_link)
+        one._hard_link = False
+        return one
 
 
 class TestPutS3(TestCase):
