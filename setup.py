@@ -20,7 +20,7 @@ long_description = f.read()
 f.close()
 
 setup(name="van.static",
-      version='0.6',
+      version='0.7',
       license='BSD-derived',
       long_description=long_description,
       url='http://pypi.python.org/pypi/van.static',
