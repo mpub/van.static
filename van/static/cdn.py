@@ -182,16 +182,21 @@ class _PutLocal:
         if self._hard_link:
             try:
                 logging.debug("Hard linking %s to %s", source, target)
-                self._if_not_exist(os.link, source, target) # hard links are fast!
+                os.link(source, target) # hard links are fast!
             except:
                 logging.debug("Hard linking failed, falling back to normal copy")
-                # don't try hard linking after first failure
-                # this may be because the files are on differnt devices or windows
-                self._hard_link = False
+                e = sys.exc_info()[1]
+                if isinstance(e, OSError) and e.errno == 17:
+                    # file exists, let's try removing it
+                    os.remove(target)
+                else:
+                    # another error, don't try hard linking after first failure
+                    # this may be because the files are on differnt devices or windows
+                    self._hard_link = False
                 self._copy(source, target)
         else:
             logging.debug("Copying %s to %s", source, target)
-            self._if_not_exist(shutil.copy, source, target) # hard links are fast!
+            shutil.copy(source, target)
 
 
 class _PutS3:

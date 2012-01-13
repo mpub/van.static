@@ -207,8 +207,18 @@ class TestPutLocalMixin:
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
             ]
+        ex = os.path.join(self._tmpdir, 'van.static', dist.version, 'tests', 'example', 'example.txt')
         one.put(to_put)
+        # change the file we wrote
+        os.remove(ex)
+        exf = open(ex, 'w')
+        exf.write('changed')
+        exf.close()
+        # put again, our file should again be written
         one.put(to_put)
+        exf = open(ex, 'r')
+        self.assertEqual(exf.read(), 'Example Text\n')
+        exf.close()
 
     def test_put(self):
         here = os.path.dirname(__file__)
