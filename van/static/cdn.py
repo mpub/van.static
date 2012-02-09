@@ -31,7 +31,7 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
     parser.add_option("--target", dest="target",
                       help=("Where to put the resources (can be the name of a "
                             "local directory, or a url on S3 "
-                            "(eg: s3://bucket_name/path) you will need s3cmd "
+                            "(eg: s3://bucket_name/path) you will need boto "
                             "available to push the files"))
     parser.add_option("--aws-access-key", dest="aws_access_key",
                       help="AWS access key")
