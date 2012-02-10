@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from unittest import TestCase
 
 from mock import patch, Mock
@@ -17,7 +19,8 @@ class TestExtractCmd(TestCase):
         extract.assert_called_once_with(
                 ['van.static.tests:static'],
                 'file:///wherever',
-                True)
+                True,
+                ignore_stamps=False)
         extract.reset_mock()
         extract_cmd(
                 resources=['van.static.tests:static'],
@@ -28,12 +31,14 @@ class TestExtractCmd(TestCase):
                     '--resource', 'van.static.tests:static',
                     '--target', 'file:///somewhere_else',
                     '--resource', 'van.static.tests:another_static',
-                    '--no-yui-compressor'
+                    '--no-yui-compressor',
+                    '--ignore-stamps'
                     ])
         extract.assert_called_once_with(
                 ['van.static.tests:static', 'van.static.tests:another_static'],
                 'file:///somewhere_else',
-                False)
+                False,
+                ignore_stamps=True)
 
     @patch("van.static.cdn.logging")
     @patch("van.static.cdn.extract")
@@ -56,7 +61,8 @@ class TestExtractCmd(TestCase):
                 'file:///somewhere_else',
                 True,
                 aws_secret_key='12345',
-                aws_access_key='1234')
+                aws_access_key='1234',
+                ignore_stamps=False)
         logging.basicConfig.assert_called_once_with(level=logging.DEBUG)
         logging.reset_mock()
         extract.reset_mock()
@@ -70,7 +76,8 @@ class TestExtractCmd(TestCase):
         extract.assert_called_once_with(
                 ['van.static.tests:static'],
                 'file:///somewhere_else',
-                False)
+                False,
+                ignore_stamps=False)
         logging.basicConfig.assert_called_once_with(level=logging.WARN)
 
     @patch("van.static.cdn.logging")
@@ -85,26 +92,32 @@ class TestExtractCmd(TestCase):
 
 class TestExtract(TestCase):
 
+    @patch("van.static.cdn.mkdtemp")
     @patch("van.static.cdn._get_putter")
     @patch("van.static.cdn._YUICompressor")
     @patch("van.static.cdn._walk_resources")
-    def test_no_comp(self, walk_resources, comp, putter):
-        from van.static.cdn import extract
-        extract(['r1', 'r2'], 'file:///path/to/local', False, another_kw=1)
-        walk_resources.assert_called_once_with(['r1', 'r2'])
+    def test_no_comp(self, walk_resources, comp, putter, mkdtemp):
+        mkdtemp.return_value = tmpdir = tempfile.mkdtemp()
+        from van.static.cdn import extract, _never_exists
+        extract(['r1', 'r2'], 'file:///path/to/local', False, ignore_stamps=True, another_kw=1)
+        walk_resources.assert_called_once_with(['r1', 'r2'], _never_exists, tmpdir)
         putter.assert_called_once_with('file:///path/to/local', another_kw=1)
         putter().put.assert_called_once_with(walk_resources())
         self.assertFalse(comp.called)
         self.assertFalse(comp.compresss.called)
         self.assertFalse(comp.dispose.called)
+        # the temporary directory was removed
+        self.assertFalse(os.path.exists(tmpdir))
 
+    @patch("van.static.cdn.mkdtemp")
     @patch("van.static.cdn._get_putter")
     @patch("van.static.cdn._YUICompressor")
     @patch("van.static.cdn._walk_resources")
-    def test_comp(self, walk_resources, comp, putter):
-        from van.static.cdn import extract
-        extract(['r1', 'r2'], 'file:///path/to/local', True, another_kw=1)
-        walk_resources.assert_called_once_with(['r1', 'r2'])
+    def test_comp(self, walk_resources, comp, putter, mkdtemp):
+        mkdtemp.return_value = tmpdir = tempfile.mkdtemp()
+        from van.static.cdn import extract, _never_exists
+        extract(['r1', 'r2'], 'file:///path/to/local', True, ignore_stamps=True, another_kw=1)
+        walk_resources.assert_called_once_with(['r1', 'r2'], _never_exists, tmpdir)
         # comp was called
         comp.assert_called_once_with()
         comp().compress.assert_called_once_with(walk_resources())
@@ -112,6 +125,21 @@ class TestExtract(TestCase):
         # and putter with the result of comp
         putter.assert_called_once_with('file:///path/to/local', another_kw=1)
         putter().put.assert_called_once_with(comp().compress())
+        # the temporary directory was removed
+        self.assertFalse(os.path.exists(tmpdir))
+
+    @patch("van.static.cdn.mkdtemp")
+    @patch("van.static.cdn._get_putter")
+    @patch("van.static.cdn._YUICompressor")
+    @patch("van.static.cdn._walk_resources")
+    def test_stamps(self, walk_resources, comp, putter, mkdtemp):
+        mkdtemp.return_value = tmpdir = tempfile.mkdtemp()
+        from van.static.cdn import extract
+        extract(['r1', 'r2'], 'file:///path/to/local', False, another_kw=1)
+        walk_resources.assert_called_once_with(['r1', 'r2'], putter().exists, tmpdir)
+        putter().put.assert_called_once_with(walk_resources())
+        # the temporary directory was removed
+        self.assertFalse(os.path.exists(tmpdir))
 
 
 class TestGetPutter(TestCase):
@@ -158,14 +186,26 @@ class TestConfigStatic(TestCase):
 
 class TestWalkResources(TestCase):
 
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
     def test_walk(self):
         from van.static.cdn import _walk_resources
+        exists = Mock()
+        exists.return_value = False
         i = _walk_resources([
             'van.static:tests/example',
-            'van.static:tests/example/js'])
+            'van.static:tests/example/js'], exists, self.tmpdir)
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
         here = os.path.dirname(__file__)
+        stamp_file1 = 'van.static-%s-ORSXG5DTF5SXQYLNOBWGK===.stamp' % dist.version
+        stamp_path1 = os.path.join(self.tmpdir, stamp_file1)
+        stamp_file2 = 'van.static-%s-ORSXG5DTF5SXQYLNOBWGKL3KOM======.stamp' % dist.version
+        stamp_path2 = os.path.join(self.tmpdir, stamp_file2)
         self.assertEqual(list(i), [
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
@@ -173,9 +213,11 @@ class TestWalkResources(TestCase):
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
             ('tests/example/js', here + '/example/js', 'van.static', dist, 'dir'),
             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
+            (stamp_file1, stamp_path1, 'van.static', dist, 'file'),
             # the duplicate of js is from the declaration of 'van.static:tests/example/js'
             ('tests/example/js', here + '/example/js', 'van.static', dist, 'dir'),
             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
+            (stamp_file2, stamp_path2, 'van.static', dist, 'file'),
             ])
 
 
@@ -249,6 +291,17 @@ class TestPutLocalMixin:
         d = os.path.join(d, 'css')
         self.assertEqual(os.listdir(d), ['example.css'])
 
+    def test_exists(self):
+        here = os.path.dirname(__file__)
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        one = self.make_one()
+        self.assertFalse(one.exists(dist, 'example.txt'))
+        one.put([
+            ('example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
+            ])
+        self.assertTrue(one.exists(dist, 'example.txt'))
+
 
 class TestPutLocal(TestPutLocalMixin, TestCase):
 
@@ -289,8 +342,26 @@ class TestPutLocalNoHardlink(TestPutLocalMixin, TestCase):
 
 class TestPutS3(TestCase):
 
-    @patch("van.static.cdn._PutS3._get_imports")
-    def test_put(self, get_imports):
+    @patch("van.static.cdn._PutS3._get_conn_class")
+    def test_exists(self, conn_class):
+        conn = Mock()
+        conn_class.return_value = conn
+        target_url = 's3://mybucket/path/to/dir'
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        here = os.path.dirname(__file__)
+        from van.static.cdn import _PutS3
+        putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret')
+        bucket = conn().get_bucket()
+        bucket.get_key.return_value = None
+        self.assertFalse(putter.exists(dist, 'whatever/wherever'))
+        bucket.get_key.assert_called_once_with('/path/to/dir/%s/%s/whatever/wherever' % (dist.project_name, dist.version))
+        bucket.get_key.return_value = 'not none'
+        self.assertTrue(putter.exists(dist, 'whatever/wherever'))
+
+    @patch("van.static.cdn._PutS3._get_key_class")
+    @patch("van.static.cdn._PutS3._get_conn_class")
+    def test_put(self, conn_class, key_class):
         conn = Mock()
         key = Mock()
         css_key = Mock()
@@ -299,7 +370,8 @@ class TestPutS3(TestCase):
         def se(bucket):
             return rv.pop(0)
         key.side_effect = se
-        get_imports.return_value = conn, key
+        conn_class.return_value = conn
+        key_class.return_value = key
         target_url = 's3://mybucket/path/to/dir'
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
@@ -397,7 +469,7 @@ class TestFunctional(TestCase):
         d = os.path.join(d, 'van.static')
         self.assertEqual(os.listdir(d), [dist.version])
         d = os.path.join(d, dist.version)
-        self.assertEqual(os.listdir(d), ['tests'])
+        self.assertEqual(os.listdir(d), ['tests', 'van.static-%s-ORSXG5DTF5SXQYLNOBWGK===.stamp' % dist.version])
         d = os.path.join(d, 'tests')
         self.assertEqual(os.listdir(d), ['example'])
         d = os.path.join(d, 'example')

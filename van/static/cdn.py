@@ -1,17 +1,20 @@
 import os
 import sys
 import shutil
+import base64
 import logging
 import optparse
-import tempfile
 import subprocess
+from tempfile import mkdtemp
 
 from pkg_resources import (get_distribution, resource_listdir, resource_isdir,
                            resource_filename)
 
+_PY3 = sys.version_info[0] == 3
+
 
 def extract_cmd(resources=None, target=None, yui_compressor=False,
-                args=sys.argv):
+                ignore_stamps=False, args=sys.argv):
     """Export from the command line"""
     parser = optparse.OptionParser(usage="usage: %prog [options]")
     res_help = "Resource to dump (may be repeated)."
@@ -33,6 +36,12 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
                             "local directory, or a url on S3 "
                             "(eg: s3://bucket_name/path) you will need boto "
                             "available to push the files"))
+    parser.add_option("--ignore-stamps", dest="ignore_stamps",
+                      action="store_true",
+                      help=("Stamp files are placed in the target to optimize "
+                            "repeated uploads. If these files are found the "
+                            "resource upload is skipped. Use this option to "
+                            "ignore these files and always updload"))
     parser.add_option("--aws-access-key", dest="aws_access_key",
                       help="AWS access key")
     parser.add_option("--aws-secret-key", dest="aws_secret_key",
@@ -42,7 +51,8 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
                       default='WARN')
     parser.set_defaults(
             yui_compressor=yui_compressor,
-            target=target)
+            target=target,
+            ignore_stamps=ignore_stamps)
     options, args = parser.parse_args(args)
     if not options.resources:
         # set our default
@@ -59,22 +69,35 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
     if options.aws_secret_key:
         kw['aws_secret_key'] = options.aws_secret_key
     assert len(args) == 1, args
-    extract(options.resources, options.target, options.yui_compressor, **kw)
+    extract(options.resources,
+            options.target,
+            options.yui_compressor,
+            ignore_stamps=options.ignore_stamps,
+            **kw)
 
+def _never_exists(dist, path):
+    return False
 
-def extract(resources, target, yui_compressor=True, **kw):
+def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
     """Export the resources"""
-    r_files = _walk_resources(resources)
     putter = _get_putter(target, **kw)
-    comp = None
+    stamps = mkdtemp()
     try:
-        if yui_compressor:
-            comp = _YUICompressor()
-            r_files = comp.compress(r_files)
-        putter.put(r_files)
+        exists = _never_exists
+        if not ignore_stamps:
+            exists = putter.exists
+        r_files = _walk_resources(resources, exists, stamps)
+        comp = None
+        try:
+            if yui_compressor:
+                comp = _YUICompressor()
+                r_files = comp.compress(r_files)
+            putter.put(r_files)
+        finally:
+            if comp is not None:
+                comp.dispose()
     finally:
-        if comp is not None:
-            comp.dispose()
+        shutil.rmtree(stamps)
 
 
 def _get_putter(target, **kw):
@@ -132,15 +155,31 @@ def _walk_resource_directory(pname, resource_directory):
             yield r_path, 'file'
 
 
-def _walk_resources(resources):
+def _walk_resources(resources, exists, tmpdir):
+    stamp_dist = get_distribution('van.static')
     for res in resources:
         pname, r_path = res.split(':', 1)
         dist = get_distribution(pname)
+        if _PY3:
+            r_path32 = base64.b32encode(r_path.encode('utf-8')).decode('ascii')
+        else:
+            r_path32 = base64.b32encode(r_path)
+        stamp_path = '%s-%s-%s.stamp' % (dist.project_name, dist.version, r_path32)
+        if exists(stamp_dist, stamp_path):
+            logging.info("Stamp found, skipping %s:%s", pname, r_path)
+            continue
         logging.info("Walking %s:%s", pname, r_path)
         resources = _walk_resource_directory(pname, r_path)
         for r, type in resources:
             fs_r = resource_filename(pname, r)
             yield r, fs_r, pname, dist, type
+        fs_r = os.path.join(tmpdir, stamp_path)
+        f = open(fs_r, 'w')
+        try:
+            f.write('Stamping %s' % res)
+        finally:
+            f.close()
+        yield stamp_path, fs_r, 'van.static', stamp_dist, 'file'
 
 
 class _PutLocal:
@@ -161,6 +200,11 @@ class _PutLocal:
             e = sys.exc_info()[1]
             if e.errno != 17:
                 raise
+
+    def exists(self, dist, path):
+        target = os.path.join(self._target_dir, dist.project_name,
+                              dist.version, path)
+        return os.path.exists(target)
 
     def put(self, files):
         proj_dirs = set([])
@@ -201,27 +245,44 @@ class _PutLocal:
 
 class _PutS3:
 
+    _cached_bucket = None
+
     def __init__(self, target, aws_access_key=None, aws_secret_key=None):
         # parse URL by hand as urlparse in python2.5 doesn't
         assert target.startswith('s3://')
         target = target[5:]
         bucket, path = target.split('/', 1)
-        self._bucket = bucket
+        self._bucket_name = bucket
         self._path = '/%s' % path
         self._aws_access_key = aws_access_key
         self._aws_secret_key = aws_secret_key
 
-    def _get_imports(self):
+    @property
+    def _bucket(self):
+        if self._cached_bucket is None:
+            S3Connection = self._get_conn_class()
+            conn = S3Connection(self._aws_access_key, self._aws_secret_key)
+            self._cached_bucket = conn.get_bucket(self._bucket_name, validate=False)
+        return self._cached_bucket
+
+    def exists(self, dist, path):
+        target = '/'.join([self._path, dist.project_name, dist.version,
+                           path])
+        return self._bucket.get_key(target) is not None
+
+    def _get_conn_class(self):
         # lazy import to not have a hard dependency on boto
         # Also so we can mock them in tests
         from boto.s3.connection import S3Connection
+        return S3Connection
+
+    def _get_key_class(self):
         from boto.s3.key import Key
-        return S3Connection, Key
+        return Key
 
     def put(self, files):
-        S3Connection, Key = self._get_imports()
-        conn = S3Connection(self._aws_access_key, self._aws_secret_key)
-        bucket = conn.get_bucket(self._bucket, validate=False)
+        Key = self._get_key_class()
+        bucket = self._bucket
         for rpath, fs_rpath, pname, dist, type in files:
             if type == 'dir':
                 continue
@@ -241,7 +302,7 @@ class _PutS3:
 class _YUICompressor:
 
     def __init__(self):
-        self._tmpdir = tempfile.mkdtemp()
+        self._tmpdir = mkdtemp()
         self._counter = 0
 
     def dispose(self):
