@@ -13,8 +13,8 @@ pyramid:
  * During development static files are stored in subversion and are configured
    as normal in Pyramid applications.
  * Before deployment, the static files are extracted from the eggs by the
-   system administrator and uploaded to a CDN. Files are versioned according
-   to the egg they come from.
+   system administrator and uploaded to a CDN. The URL on the CDN varies
+   depending on the egg version the files where extracted from.
  * During extraction, CSS and JS files can be optionally minified.
  * In production, the system administrator configures the application to use
    static files from the CDN.
@@ -24,7 +24,7 @@ This workflow has these advantages:
  * Minimal impact on development. Changes to files are immediately visible,
    also developers work with un-compressed files.
  * CDN served files can have very long cache-control times while still allowing
-   the it to be updated almost immediately on application upgrade.
+   them to be updated almost immediately on application upgrade.
 
 Testing an extraction
 +++++++++++++++++++++
@@ -34,7 +34,7 @@ following commands will extract the ``static`` resource from the ``deform``
 package to the ``test_extract`` directory:
 
     $ mkdir test_extract
-    $ python cdn.py --target "file://$(pwd)/test_extract" --resource deform:static 
+    $ python van/static/cdn.py --target "file://$(pwd)/test_extract" --resource deform:static
 
 NOTE: the deform package must be on the python path.
 
@@ -72,6 +72,18 @@ TODO:
  * Try get enough bits of this into Pyramid so the config_static function is
    unnecessary.
 
+APT integration
++++++++++++++++
+
+For system administrators who use APT to install packages, a useful trick is
+put a snippet into ``/etc/apt/apt.conf.d/``::
+
+    DPkg::Post-Invoke::      { "/path/to/extraction/script"; };
+
+So that the extraction script runs whenever packages are installed on the
+application servers. Note that if you have ``etckeeper`` installed, this should
+be placed afterwards.
+
 JSLint testing support
 ----------------------
 
@@ -83,7 +95,7 @@ unittest. For example:
     >>> import unittest
 
     >>> class TestJSLint(unittest.TestCase):
-    ... 
+    ...
     ...     def test_static(self):
     ...         from van.static.testing import assert_jslint_dir
     ...         from pkg_resources import resource_filename, cleanup_resources
