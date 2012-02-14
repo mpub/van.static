@@ -66,12 +66,6 @@ You would make ``my_extract_filesystem_command`` a command line script for the
 system administrator to run on deployment. Likewise ``static_cdn`` is set by
 the system administrator to the url where the files were exported to.
 
-TODO:
-
- * Write tests, this was a spike that turned out to work.
- * Try get enough bits of this into Pyramid so the config_static function is
-   unnecessary.
-
 APT integration
 +++++++++++++++
 
