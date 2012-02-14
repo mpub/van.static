@@ -101,3 +101,9 @@ YUI3 loader configuration helper
 
 ``van.static.yui`` holds utilities to simplify setting up a YUI3 loader
 configuration from a directory of JS modules.
+
+Contributing
+------------
+
+If you're interested, the primary development repository over at github
+https://github.com/jinty/van.static
