@@ -72,7 +72,7 @@ APT integration
 For system administrators who use APT to install packages, a useful trick is
 put a snippet into ``/etc/apt/apt.conf.d/``::
 
-    DPkg::Post-Invoke::      { "/path/to/extraction/script"; };
+    DPkg::Post-Invoke::      "/path/to/extraction/script";
 
 So that the extraction script runs whenever packages are installed on the
 application servers. Note that if you have ``etckeeper`` installed, this should
