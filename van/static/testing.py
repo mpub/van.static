@@ -12,7 +12,7 @@ except ImportError:
 except NotImplementedError:
     pass
 
-def assert_jslint_dir(path, failfast=False):
+def assert_jslint_dir(path, failfast=False, jslint='jslint'):
     """Run jslint on all .js files under path.
 
     return True or raises an AssertionError if any file fails.
@@ -20,7 +20,7 @@ def assert_jslint_dir(path, failfast=False):
     This function will attempt to start the 2*number of CPU's to speed up
     checking.
     """
-    messages, files = jslint_dir(path, failfast)
+    messages, files = jslint_dir(path, failfast, jslint)
     if not files:
         raise AssertionError("Did not find any .js files to check in %s" % path)
     if not messages:
@@ -33,7 +33,7 @@ def assert_jslint_dir(path, failfast=False):
         lines.append(m['stdout'])
     raise AssertionError('\n'.join(lines))
 
-def jslint_dir(path, failfast):
+def jslint_dir(path, failfast, jslint='jslint'):
     queue = []
     messages = []
     files_checked = []
@@ -47,7 +47,7 @@ def jslint_dir(path, failfast):
     running = {}
     while queue:
         next = queue.pop(0)
-        p, output = _start_jslint(next)
+        p, output = _start_jslint(next, jslint)
         running[next] = p, output
         if len(running) == MAX_PROCS:
             # just wait till one of the processes is finished
@@ -59,8 +59,7 @@ def jslint_dir(path, failfast):
         messages.extend(_check_running(running))
     return messages, files_checked
 
-def _start_jslint(path):
-    exc = 'jslint'
+def _start_jslint(path, exc):
     output = tempfile.TemporaryFile()
     try:
         p = subprocess.Popen([exc, path],
