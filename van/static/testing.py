@@ -60,10 +60,14 @@ def jslint_dir(path, failfast):
     return messages, files_checked
 
 def _start_jslint(path):
+    exc = 'jslint'
     output = tempfile.TemporaryFile()
-    p = subprocess.Popen(['jslint', path],
-            stdout=output,
-            stderr=subprocess.STDOUT)
+    try:
+        p = subprocess.Popen([exc, path],
+                stdout=output,
+                stderr=subprocess.STDOUT)
+    except OSError:
+        raise Exception("could not find jslint executable: %s" % exc)
     return p, output
 
 def _check_running(running):
