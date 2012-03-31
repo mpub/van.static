@@ -118,7 +118,7 @@ If you're interested, the primary development repository over at github
 https://github.com/jinty/van.static
 
 
-.. comment::
+..
     Test... Make sure we can actually create the app:
 
     >>> app = make_pyramid_app()
