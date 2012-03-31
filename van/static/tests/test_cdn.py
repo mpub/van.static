@@ -153,12 +153,65 @@ class TestGetPutter(TestCase):
         p = _get_putter('s3://bucket/whatever')
         self.assertTrue(isinstance(p, _PutS3))
 
+class DummyStaticURLInfo:
+    # copied from pyramid tests
+    def __init__(self):
+        self.added = []
+
+    def add(self, config, name, spec, **kw):
+        self.added.append((config, name, spec, kw))
+
+class TestDirective(TestCase):
+
+    def _one(self):
+        from pyramid.config import Configurator
+        from pyramid.interfaces import IStaticURLInfo
+        info = DummyStaticURLInfo()
+        config = Configurator(
+                autocommit=True,
+                settings=dict(info=info))
+        config.registry.registerUtility(info, IStaticURLInfo)
+        config.include('van.static.cdn')
+        return config
+
+    def test_no_cdn(self):
+        config = self._one()
+        config.add_cdn_view('name1', 'package1:path1')
+        self.assertEqual(
+                config.registry.settings['info'].added,
+                [(config, 'name1', 'package1:path1', {})])
+
+    def test_cdn(self):
+        config = self._one()
+        import pkg_resources
+        version = pkg_resources.get_distribution('van.static').version
+        config.add_cdn_view('http://cdn.example.com/path', 'van.static:static_files')
+        self.assertEqual(
+                config.registry.settings['info'].added,
+                [(config, 'http://cdn.example.com/path/van.static/%s/static_files' % version, 'van.static:static_files', {})])
+
+    def test_functional(self):
+        from pyramid.config import Configurator
+        from pyramid.testing import DummyRequest
+        import pkg_resources
+        version = pkg_resources.get_distribution('van.static').version
+        config = Configurator(autocommit=True)
+        config.include('van.static.cdn')
+        config.add_cdn_view('http://cdn.example.com/path', 'van.static:static_files')
+        config.add_cdn_view('name1', 'package1:path1')
+        req = DummyRequest()
+        req.registry = config.registry
+        # req.static_url actually generates the right urls
+        self.assertEqual(req.static_url('package1:path1/path2'), 'http://example.com/name1/path2')
+        self.assertEqual(req.static_url('van.static:static_files/file1.js'), 'http://cdn.example.com/path/van.static/%s/static_files/file1.js' % version)
+
 
 class TestConfigStatic(TestCase):
 
     def test_no_cdn(self):
         from van.static.cdn import config_static
-        config = Mock(['add_static_view'])
+        config = Mock(['add_static_view', 'package_name'])
+        config.package_name = None
         config_static(
                 config,
                 [('name1', 'package1:path1'),
@@ -169,7 +222,8 @@ class TestConfigStatic(TestCase):
 
     def test_cdn(self):
         from van.static.cdn import config_static
-        config = Mock(['add_static_view'])
+        config = Mock(['add_static_view', 'package_name'])
+        config.package_name = None
         cdn_url = "http://cdn.example.com/path/to/wherever"
         config_static(
                 config,

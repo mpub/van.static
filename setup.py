@@ -33,6 +33,7 @@ setup(name="van.static",
       tests_require = ['mock'],
       install_requires = [
           'setuptools',
+          'pyramid',
           ],
       classifiers=[
           'Programming Language :: Python :: 2.5',

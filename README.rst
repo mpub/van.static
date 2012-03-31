@@ -45,26 +45,24 @@ resources will be placed directly in Amazon S3. You need to manually install
 Implementing in your application
 ++++++++++++++++++++++++++++++++
 
-One way would be to have code like this:
-
-    >>> from van.static import cdn
-
-    >>> GLOBAL_LIST_OF_STATIC_RESOURCES = (
-    ...     ('my_app_static_view_name': 'myapp:static'),
-    ...     ('deform_static_view_name': 'deform:static'))
+One way would be to have code like this in your package:
 
     >>> def my_extract_filesystem_command():
     ...     """Customized extract command for my application"""
-    ...     cdn.extract_cmd([r[1] for r in GLOBAL_LIST_OF_STATIC_RESOURCES], yui_compressor=True)
+    ...     cdn.extract_cmd(['myapp:static', 'deform:static'], yui_compressor=True)
 
-    >>> def make_pyramid_app(static_cdn=None):
+    >>> from pyramid.config import Configurator
+    >>> def make_pyramid_app(cdn_url=None):
     ...     config = Configurator()
-    ...     cdn.config_static(config, GLOBAL_LIST_OF_STATIC_RESOURCES, static_cdn=static_cdn)
+    ...     config.include('van.static.cdn')
+    ...     config.add_cdn_view(cdn_url or 'myapp_static', 'myapp:static')
+    ...     config.add_cdn_view(cdn_url or 'deform_static', 'deform:static')
     ...     return config.make_wsgi_app()
 
-You would make ``my_extract_filesystem_command`` a command line script for the
-system administrator to run on deployment. Likewise ``static_cdn`` is set by
-the system administrator to the url where the files were exported to.
+You would make ``my_extract_filesystem_command`` a command line script
+for the system administrator to run on deployment. Likewise the
+``cdn_url`` configuration option is set by the system administrator to
+the url where the files were exported to.
 
 APT integration
 +++++++++++++++

@@ -7,10 +7,54 @@ import optparse
 import subprocess
 from tempfile import mkdtemp
 
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    #python 2
+    from urlparse import urlparse
+
+from pyramid.static import resolve_asset_spec
 from pkg_resources import (get_distribution, resource_listdir, resource_isdir,
                            resource_filename)
 
 _PY3 = sys.version_info[0] == 3
+
+def includeme(config):
+    config.add_directive('add_cdn_view', add_cdn_view)
+
+
+def add_cdn_view(config, name, path):
+    """Add a view used to render static assets.
+
+    This calls ``config.add_static_view`` underneath the hood.
+
+    If name is not an absolute URL, ``add_static_view`` is called directly with
+    ``name`` and ``path`` unchanged.
+
+    If ``name`` is an absolute URL, the project name and version from ``path``
+    are added to it before calling ``add_static_view``. This url scheme matches
+    the paths to which the resources are extracted to by ``extract_cmd``.
+
+    For example, if ``name`` is ``http://cdn.example.com/path``, ``path`` is
+    ``mypackage`` and the current version of ``mypackage`` is ``1.2.3`` then
+    ``add_static_view is called with this url:
+
+        http://cdn.example.com/path/mypackage/1.2.3
+
+    Note that `path` is the path to the resource within the package.
+    """
+    package, filename = resolve_asset_spec(path, config.package_name)
+    if package is None:
+        raise ValueError("Package relative paths are required")
+    path = '%s:%s' % (package, filename)
+    if urlparse(name).scheme:
+        # Name is an absolute url to CDN
+        while name.endswith('/'):
+            name = name[:-1]
+        dist = get_distribution(package)
+        name = '/'.join([name, dist.project_name, dist.version,
+                         filename])
+    config.add_static_view(name=name, path=path)
 
 
 def extract_cmd(resources=None, target=None, yui_compressor=False,
@@ -111,6 +155,10 @@ def _get_putter(target, **kw):
 def config_static(config, static_resources, static_cdn=None):
     """Configure a Pyramid application with a list of static resources.
 
+    .. warning::
+        This method is deprecated, please use the add_cdn_view directive
+        instead. At same future point ``config_static`` will be removed.
+
     If static_cdn is None, the resource will be configured to use the local
     server. Ideal for development.
 
@@ -124,14 +172,10 @@ def config_static(config, static_resources, static_cdn=None):
     if static_cdn is None:
         for name, path in static_resources:
             assert ':' in path, 'Is not relative to a package: %r' % path
-            config.add_static_view(name=name, path=path)
+            add_cdn_view(config, name=name, path=path)
     else:
         for name, path in static_resources:
-            pname, filepath = path.split(':', 1)
-            dist = get_distribution(pname)
-            name = '/'.join([static_cdn, dist.project_name, dist.version,
-                             filepath])
-            config.add_static_view(name=name, path=path)
+            add_cdn_view(config, name=static_cdn, path=path)
 
 
 def _walk_resource_directory(pname, resource_directory):
