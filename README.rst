@@ -4,8 +4,19 @@ Tools for managing Pyramid static files on a CDN
 Serving static files from a CDN
 -------------------------------
 
-Rationale
-+++++++++
+A Content Delivery Network (CDN) allows you to serve static files to
+users faster. For a web application the primary benefit is that your
+pages render faster, giving a better user experience.
+
+Additionally, content such as JavaScript or CSS files should be
+"slimmed" before being placed on a CDN. By decreasing the file size you
+further improve the user experience with even faster loading.
+
+van.static gives you a tool to optionally deploy files to a CDN without
+making the development process more onerous.
+
+Workflow
+++++++++
 
 This tool aids in implementing a very specific workflow using static files and
 pyramid:
@@ -105,3 +116,9 @@ Contributing
 
 If you're interested, the primary development repository over at github
 https://github.com/jinty/van.static
+
+
+.. comment::
+    Test... Make sure we can actually create the app:
+
+    >>> app = make_pyramid_app()
