@@ -47,7 +47,7 @@ setup(name="van.static",
           'Programming Language :: Python',
           'Topic :: Internet :: WWW/HTTP',
           'Development Status :: 5 - Production/Stable',
-          'Framework :: Pylons', # actually pyramid, but that's part of pylons
+          'Framework :: Pyramid',
           ],
       include_package_data = True,
       )
