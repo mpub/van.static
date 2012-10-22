@@ -50,7 +50,7 @@ def find_modules(resource, reload=False, fail_onerror=True):
     _MODULE_CACHE[resource] = modules
     return find_modules(resource, reload=False)
 
-def find_group(request, resource, fail_onerror=False):
+def find_group(request, resource, fail_onerror=True):
     """Return a group for the YU3 loader configuration.
 
     This will look into the resource (which must be a directory) and extract
