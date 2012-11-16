@@ -366,7 +366,7 @@ class _YUICompressor:
 
     def dispose(self):
         if self._tmpdir is not None:
-            logging.debug("_YITCompressior: removing temp workspace: %s",
+            logging.debug("_YUICompressior: removing temp workspace: %s",
                           self._tmpdir)
             shutil.rmtree(self._tmpdir)
             self._tmpdir = None
