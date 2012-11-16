@@ -5,6 +5,11 @@ from unittest import TestCase
 
 from mock import patch, Mock
 
+def _iter_to_dict(i):
+    from van.static.cdn import _to_dict
+    for e in i:
+        yield _to_dict(*e)
+
 class TestExtractCmd(TestCase):
 
     @patch("van.static.cdn.logging")
@@ -260,7 +265,7 @@ class TestWalkResources(TestCase):
         stamp_path1 = os.path.join(self.tmpdir, stamp_file1)
         stamp_file2 = 'van.static-%s-ORSXG5DTF5SXQYLNOBWGKL3KOM======.stamp' % dist.version
         stamp_path2 = os.path.join(self.tmpdir, stamp_file2)
-        self.assertEqual(list(i), [
+        self.assertEqual(list(i), list(_iter_to_dict([
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
@@ -272,7 +277,7 @@ class TestWalkResources(TestCase):
             ('tests/example/js', here + '/example/js', 'van.static', dist, 'dir'),
             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
             (stamp_file2, stamp_path2, 'van.static', dist, 'file'),
-            ])
+            ])))
 
 
 class TestPutLocalMixin:
@@ -304,14 +309,14 @@ class TestPutLocalMixin:
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
             ]
         ex = os.path.join(self._tmpdir, 'van.static', dist.version, 'tests', 'example', 'example.txt')
-        one.put(to_put)
+        one.put(_iter_to_dict(to_put))
         # change the file we wrote
         os.remove(ex)
         exf = open(ex, 'w')
         exf.write('changed')
         exf.close()
         # put again, our file should again be written
-        one.put(to_put)
+        one.put(_iter_to_dict(to_put))
         exf = open(ex, 'r')
         self.assertEqual(exf.read(), 'Example Text\n')
         exf.close()
@@ -321,12 +326,12 @@ class TestPutLocalMixin:
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
         one = self.make_one()
-        one.put([
+        one.put(_iter_to_dict([
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
-            ])
+            ]))
         d = self._tmpdir
         self.assertEqual(os.listdir(d), ['van.static'])
         d = os.path.join(d, 'van.static')
@@ -351,9 +356,9 @@ class TestPutLocalMixin:
         dist = get_distribution('van.static')
         one = self.make_one()
         self.assertFalse(one.exists(dist, 'example.txt'))
-        one.put([
+        one.put(_iter_to_dict([
             ('example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
-            ])
+            ]))
         self.assertTrue(one.exists(dist, 'example.txt'))
 
 
@@ -371,14 +376,14 @@ class TestPutLocal(TestPutLocalMixin, TestCase):
             ]
         # if link never fails it gets called twice
         self.assertTrue(one._hard_link)
-        one.put(to_put)
+        one.put(_iter_to_dict(to_put))
         self.assertTrue(one._hard_link)
         self.assertEqual(link.call_count, 2)
         self.assertEqual(copy.call_count, 0)
         # if link now fails, we fall back to copy
         link.reset_mock()
         link.side_effect = Exception('boom')
-        one.put(to_put)
+        one.put(_iter_to_dict(to_put))
         self.assertFalse(one._hard_link)
         self.assertEqual(link.call_count, 1)
         self.assertEqual(copy.call_count, 2)
@@ -432,12 +437,12 @@ class TestPutS3(TestCase):
         here = os.path.dirname(__file__)
         from van.static.cdn import _PutS3
         putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret')
-        putter.put([
+        putter.put(_iter_to_dict([
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
-            ])
+            ]))
         conn.assert_called_once_with('key', 'secret')
         conn().get_bucket.assert_called_once_with('mybucket', validate=False)
         bucket = conn().get_bucket()
@@ -478,8 +483,9 @@ class TestYUICompressor(TestCase):
         here = os.path.dirname(__file__)
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
-        input =[('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
-                ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file')]
+        input = list(_iter_to_dict(
+            [('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
+             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file')]))
         self.assertEqual(list(self.one.compress(iter(input))), input)
         self.assertFalse(subprocess.check_call.called)
 
@@ -489,10 +495,10 @@ class TestYUICompressor(TestCase):
         here = os.path.dirname(__file__)
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
-        input = [('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
-                 ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file')]
-        out = [('tests/example/css/example.css', self.one._tmpdir + '/1-example.css', 'van.static', dist, 'file'),
-               ('tests/example/js/example.js', self.one._tmpdir + '/2-example.js', 'van.static', dist, 'file')]
+        input = list(_iter_to_dict([('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
+                 ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file')]))
+        out = list(_iter_to_dict([('tests/example/css/example.css', self.one._tmpdir + '/1-example.css', 'van.static', dist, 'file'),
+               ('tests/example/js/example.js', self.one._tmpdir + '/2-example.js', 'van.static', dist, 'file')]))
         self.assertEqual(list(self.one.compress(iter(input))), out)
         self.assertEqual(subprocess.check_call.call_args_list, [
             ((['yui-compressor', '--type', 'css', '-o', self.one._tmpdir + '/1-example.css', here + '/example/css/example.css'], ), ),

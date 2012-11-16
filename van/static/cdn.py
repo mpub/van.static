@@ -216,14 +216,14 @@ def _walk_resources(resources, exists, tmpdir):
         resources = _walk_resource_directory(pname, r_path)
         for r, type in resources:
             fs_r = resource_filename(pname, r)
-            yield r, fs_r, pname, dist, type
+            yield _to_dict(r, fs_r, pname, dist, type)
         fs_r = os.path.join(tmpdir, stamp_path)
         f = open(fs_r, 'w')
         try:
             f.write('Stamping %s' % res)
         finally:
             f.close()
-        yield stamp_path, fs_r, 'van.static', stamp_dist, 'file'
+        yield _to_dict(stamp_path, fs_r, 'van.static', stamp_dist, 'file')
 
 
 class _PutLocal:
@@ -252,7 +252,12 @@ class _PutLocal:
 
     def put(self, files):
         proj_dirs = set([])
-        for rpath, fs_rpath, pname, dist, type in files:
+        for f in files:
+            rpath = f['resource_path']
+            fs_rpath = f['filesystem_path']
+            pname = f['distribution_name']
+            dist = f['distribution']
+            type = f['type']
             fs_path = rpath.replace('/', os.sep)  # enough for windows?
             target = os.path.join(self._target_dir, dist.project_name,
                                   dist.version, fs_path)
@@ -327,21 +332,31 @@ class _PutS3:
     def put(self, files):
         Key = self._get_key_class()
         bucket = self._bucket
-        for rpath, fs_rpath, pname, dist, type in files:
-            if type == 'dir':
+        for f in files:
+            if f['type'] == 'dir':
                 continue
-            logging.debug("putting to S3: %s",
-                          (rpath, fs_rpath, pname, dist, type))
+            dist = f['distribution']
+            logging.debug("putting to S3: %s", (f, ))
             target = '/'.join([self._path, dist.project_name, dist.version,
-                               rpath])
+                               f['resource_path']])
             key = Key(bucket)
             key.key = target
             key.set_contents_from_filename(
-                    fs_rpath,
+                    f['filesystem_path'],
                     reduced_redundancy=True,
                     headers={'Cache-Control': 'max-age=32140800'},
                     policy='public-read')
 
+def _to_dict(resource_path, filesystem_path, distribution_name, distribution, type):
+    """Convert a tuple of values to a more plugin friendly dictionary.
+
+    - `resource_path` is the path to file within resource (distribution)
+    - `filesystem_path` is path to file on local filesystem
+    - `distribution` is the pkg_resources distribution object
+    - `distribution_name` is the pkg_resources distribution name
+    - `type` is a string indicating the resource type, `file` for a filesystem file and `dir` for a directory
+    """
+    return locals()
 
 class _YUICompressor:
 
@@ -360,13 +375,18 @@ class _YUICompressor:
         self.dispose()
 
     def compress(self, files):
-        for rpath, fs_rpath, pname, dist, f_type in files:
+        for f in files:
+            rpath = f['resource_path']
+            fs_rpath = f['filesystem_path']
+            pname = f['distribution_name']
+            dist = f['distribution']
+            f_type = f['type']
             if f_type == 'file' and rpath.endswith('.js'):
                 type = 'js'
             elif f_type == 'file' and rpath.endswith('.css'):
                 type = 'css'
             else:
-                yield rpath, fs_rpath, pname, dist, f_type
+                yield _to_dict(rpath, fs_rpath, pname, dist, f_type)
                 continue
             self._counter += 1
             target = os.path.join(self._tmpdir, str(self._counter) + '-' +
@@ -375,7 +395,7 @@ class _YUICompressor:
             logging.debug('Compressing with YUI Compressor %s file, '
                           'from %s to %s', type, fs_rpath, target)
             subprocess.check_call(args)
-            yield rpath, target, pname, dist, f_type
+            yield _to_dict(rpath, target, pname, dist, f_type)
 
 if __name__ == "__main__":
     extract_cmd()
