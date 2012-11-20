@@ -1,11 +1,13 @@
 import os
 import sys
+import gzip
 import shutil
 import base64
 import logging
 import optparse
+import mimetypes
 import subprocess
-from tempfile import mkdtemp
+from tempfile import mkdtemp, mkstemp
 
 try:
     from urllib.parse import urlparse
@@ -23,7 +25,7 @@ def includeme(config):
     config.add_directive('add_cdn_view', add_cdn_view)
 
 
-def add_cdn_view(config, name, path):
+def add_cdn_view(config, name, path, encodings=()):
     """Add a view used to render static assets.
 
     This calls ``config.add_static_view`` underneath the hood.
@@ -52,13 +54,24 @@ def add_cdn_view(config, name, path):
         while name.endswith('/'):
             name = name[:-1]
         dist = get_distribution(package)
-        name = '/'.join([name, dist.project_name, dist.version,
-                         filename])
-    config.add_static_view(name=name, path=path)
+        for enc in [None] + list(encodings):
+            parts = [name, dist.project_name, dist.version]
+            p = path
+            if enc:
+                parts.append(enc)
+                pack, p = p.split(':', 1)
+                p = ':'.join([pack, '/'.join([enc, p])])
+            parts.append(filename)
+            n = '/'.join(parts)
+            config.add_static_view(name=n, path=p)
+    else:
+        if encodings:
+            raise NotImplementedError('Refusing to guess what a static filesystem view with encodings mean (for now)')
+        config.add_static_view(name=name, path=path)
 
 
 def extract_cmd(resources=None, target=None, yui_compressor=False,
-                ignore_stamps=False, args=sys.argv):
+                ignore_stamps=False, encodings=None, args=sys.argv):
     """Export from the command line"""
     parser = optparse.OptionParser(usage="usage: %prog [options]")
     res_help = "Resource to dump (may be repeated)."
@@ -80,6 +93,15 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
                             "local directory, or a url on S3 "
                             "(eg: s3://bucket_name/path) you will need boto "
                             "available to push the files"))
+    parser.add_option("--encoding", dest="encodings",
+                      action="append",
+                      help=("This option exists to support serving compressed "
+                            "resources over HTTP. For each --encoding a "
+                            "compressed copy of the file will be uploaded "
+                            "to the target with the relevant 'Content-Encoding' "
+                            "header. The local-filesystem does not support this. "
+                            "The path of the encoded file upload is prefixed by "
+                            "the encoding."))
     parser.add_option("--ignore-stamps", dest="ignore_stamps",
                       action="store_true",
                       help=("Stamp files are placed in the target to optimize "
@@ -98,6 +120,9 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
             target=target,
             ignore_stamps=ignore_stamps)
     options, args = parser.parse_args(args)
+    if not options.encodings:
+        # set our default
+        options.encodings = encodings
     if not options.resources:
         # set our default
         options.resources = resources
@@ -112,6 +137,8 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
         kw['aws_access_key'] = options.aws_access_key
     if options.aws_secret_key:
         kw['aws_secret_key'] = options.aws_secret_key
+    if options.encodings:
+        kw['encodings'] = options.encodings
     assert len(args) == 1, args
     extract(options.resources,
             options.target,
@@ -125,23 +152,26 @@ def _never_exists(dist, path):
 def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
     """Export the resources"""
     putter = _get_putter(target, **kw)
-    stamps = mkdtemp()
     try:
-        exists = _never_exists
-        if not ignore_stamps:
-            exists = putter.exists
-        r_files = _walk_resources(resources, exists, stamps)
-        comp = None
+        stamps = mkdtemp()
         try:
-            if yui_compressor:
-                comp = _YUICompressor()
-                r_files = comp.compress(r_files)
-            putter.put(r_files)
+            exists = _never_exists
+            if not ignore_stamps:
+                exists = putter.exists
+            r_files = _walk_resources(resources, exists, stamps)
+            comp = None
+            try:
+                if yui_compressor:
+                    comp = _YUICompressor()
+                    r_files = comp.compress(r_files)
+                putter.put(r_files)
+            finally:
+                if comp is not None:
+                    comp.dispose()
         finally:
-            if comp is not None:
-                comp.dispose()
+            shutil.rmtree(stamps)
     finally:
-        shutil.rmtree(stamps)
+        putter.close()
 
 
 def _get_putter(target, **kw):
@@ -235,6 +265,9 @@ class _PutLocal:
         self._target_dir = target = target[7:]
         logging.info("Putting resources in %s", self._target_dir)
 
+    def close(self):
+        pass
+
     def _if_not_exist(self, func, *args, **kw):
         # call for file operations that may fail with
         #   OSError: [Errno 17] File exists
@@ -291,20 +324,36 @@ class _PutLocal:
             logging.debug("Copying %s to %s", source, target)
             shutil.copy(source, target)
 
+_GZ_MIMETYPES = frozenset([
+        'text/plain',
+        'text/html',
+        'text/css',
+        'application/javascript',
+        'application/x-javascript',
+        'text/xml',
+        'application/json',
+        'application/xml',
+        'image/svg+xml'])
 
 class _PutS3:
 
     _cached_bucket = None
 
-    def __init__(self, target, aws_access_key=None, aws_secret_key=None):
+    def __init__(self, target, aws_access_key=None, aws_secret_key=None, encodings=()):
         # parse URL by hand as urlparse in python2.5 doesn't
         assert target.startswith('s3://')
         target = target[5:]
         bucket, path = target.split('/', 1)
+        self._encodings = encodings
         self._bucket_name = bucket
         self._path = '/%s' % path
         self._aws_access_key = aws_access_key
         self._aws_secret_key = aws_secret_key
+        self._tmpdir = mkdtemp()
+
+    def _get_temp_file(self):
+        handle, filename = mkstemp(dir=self._tmpdir)
+        return os.fdopen(handle, 'wb'), filename
 
     @property
     def _bucket(self):
@@ -329,23 +378,62 @@ class _PutS3:
         from boto.s3.key import Key
         return Key
 
+    def _should_gzip(self, filename):
+        return mimetypes.guess_type(filename)[0] in _GZ_MIMETYPES
+
+    def close(self):
+        if self._tmpdir is not None:
+            logging.debug("_S3Putter: removing temp workspace: %s",
+                          self._tmpdir)
+            shutil.rmtree(self._tmpdir)
+            self._tmpdir = None
+
     def put(self, files):
         Key = self._get_key_class()
         bucket = self._bucket
+        encodings = [None] + list(self._encodings)
         for f in files:
             if f['type'] == 'dir':
                 continue
             dist = f['distribution']
-            logging.debug("putting to S3: %s", (f, ))
-            target = '/'.join([self._path, dist.project_name, dist.version,
-                               f['resource_path']])
-            key = Key(bucket)
-            key.key = target
-            key.set_contents_from_filename(
-                    f['filesystem_path'],
-                    reduced_redundancy=True,
-                    headers={'Cache-Control': 'max-age=32140800'},
-                    policy='public-read')
+            prefix = '/'.join([self._path, dist.project_name, dist.version])
+            for enc in encodings:
+                headers = {'Cache-Control': 'max-age=32140800'}
+                if enc is None:
+                    target = '/'.join([prefix, f['resource_path']])
+                    fs_path = f['filesystem_path']
+                elif enc == 'gzip':
+
+                    target = '/'.join([prefix, enc, f['resource_path']])
+                    filename = f['resource_path'].split('/')[-1]
+                    if self._should_gzip(filename):
+                        headers['Content-Encoding'] = 'gzip'
+                        source = f['filesystem_path']
+                        c_file, fs_path = self._get_temp_file()
+                        try:
+                            file = gzip.GzipFile(filename, 'wb', 9, c_file)
+                            try:
+                                source = open(source, 'rb')
+                                try:
+                                    file.write(source.read())
+                                finally:
+                                    source.close()
+                            finally:
+                                file.close()
+                        finally:
+                            c_file.close()
+                    else:
+                        fs_path = f['filesystem_path']
+                else:
+                    raise NotImplementedError()
+                logging.info("putting to S3: %s with headers: %s", target, headers)
+                key = Key(bucket)
+                key.key = target
+                key.set_contents_from_filename(
+                        fs_path,
+                        reduced_redundancy=True,
+                        headers=headers,
+                        policy='public-read')
 
 def _to_dict(resource_path, filesystem_path, distribution_name, distribution, type):
     """Convert a tuple of values to a more plugin friendly dictionary.

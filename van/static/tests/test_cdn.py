@@ -1,9 +1,18 @@
 import os
+import sys
 import shutil
 import tempfile
 from unittest import TestCase
 
 from mock import patch, Mock
+
+_PY3 = sys.version_info[0] == 3
+if _PY3:
+    def b(s):
+        return s.encode("latin-1")
+else:
+    def b(s):
+        return s
 
 def _iter_to_dict(i):
     from van.static.cdn import _to_dict
@@ -54,17 +63,19 @@ class TestExtractCmd(TestCase):
                 args=[
                     'export_cmd',
                     '--resource', 'van.static.tests:static',
-                    '--target', 'file:///somewhere_else',
+                    '--target', 's3:///somewhere_else',
                     '--resource', 'van.static.tests:another_static',
                     '--yui-compressor',
+                    '--encoding', 'gzip',
                     '--aws-access-key', '1234',
                     '--aws-secret-key', '12345',
                     '--loglevel', 'DEBUG',
                     ])
         extract.assert_called_once_with(
                 ['van.static.tests:static', 'van.static.tests:another_static'],
-                'file:///somewhere_else',
+                's3:///somewhere_else',
                 True,
+                encodings=['gzip'],
                 aws_secret_key='12345',
                 aws_access_key='1234',
                 ignore_stamps=False)
@@ -96,6 +107,13 @@ class TestExtractCmd(TestCase):
 
 
 class TestExtract(TestCase):
+
+    @patch("van.static.cdn._get_putter")
+    @patch("van.static.cdn._walk_resources")
+    def test_putter_closed(self, walk_resources, putter):
+        from van.static.cdn import extract
+        extract(['r1', 'r2'], 'file:///path/to/local', False, ignore_stamps=True)
+        self.assertTrue(putter().close.called)
 
     @patch("van.static.cdn.mkdtemp")
     @patch("van.static.cdn._get_putter")
@@ -155,8 +173,10 @@ class TestGetPutter(TestCase):
         from van.static.cdn import _PutS3
         p = _get_putter('file:///tmp/whatever')
         self.assertTrue(isinstance(p, _PutLocal))
+        p.close()
         p = _get_putter('s3://bucket/whatever')
         self.assertTrue(isinstance(p, _PutS3))
+        p.close()
 
 class DummyStaticURLInfo:
     # copied from pyramid tests
@@ -194,6 +214,16 @@ class TestDirective(TestCase):
         self.assertEqual(
                 config.registry.settings['info'].added,
                 [(config, 'http://cdn.example.com/path/van.static/%s/static_files' % version, 'van.static:static_files', {})])
+
+    def test_cdn_encodings(self):
+        config = self._one()
+        import pkg_resources
+        version = pkg_resources.get_distribution('van.static').version
+        config.add_cdn_view('http://cdn.example.com/path', 'van.static:static_files', encodings=['gzip'])
+        self.assertEqual(
+                config.registry.settings['info'].added,
+                [(config, 'http://cdn.example.com/path/van.static/%s/static_files' % version, 'van.static:static_files', {}),
+                 (config, 'http://cdn.example.com/path/van.static/%s/gzip/static_files' % version, 'van.static:gzip/static_files', {})])
 
     def test_functional(self):
         from pyramid.config import Configurator
@@ -270,6 +300,8 @@ class TestWalkResources(TestCase):
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
+            ('tests/example/images', here + '/example/images', 'van.static', dist, 'dir'),
+            ('tests/example/images/example.jpg', here + '/example/images/example.jpg', 'van.static', dist, 'file'),
             ('tests/example/js', here + '/example/js', 'van.static', dist, 'dir'),
             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
             (stamp_file1, stamp_path1, 'van.static', dist, 'file'),
@@ -417,6 +449,7 @@ class TestPutS3(TestCase):
         bucket.get_key.assert_called_once_with('/path/to/dir/%s/%s/whatever/wherever' % (dist.project_name, dist.version))
         bucket.get_key.return_value = 'not none'
         self.assertTrue(putter.exists(dist, 'whatever/wherever'))
+        putter.close()
 
     @patch("van.static.cdn._PutS3._get_key_class")
     @patch("van.static.cdn._PutS3._get_conn_class")
@@ -466,7 +499,75 @@ class TestPutS3(TestCase):
                 reduced_redundancy=True,
                 headers={'Cache-Control': 'max-age=32140800'},
                 policy='public-read')
+        putter.close()
 
+    @patch("van.static.cdn._PutS3._get_key_class")
+    @patch("van.static.cdn._PutS3._get_conn_class")
+    def test_put_encodings(self, conn_class, key_class):
+        keys = []
+        def record_keys(bucket):
+            mock = Mock()
+            keys.append(mock)
+            return mock
+        key_class().side_effect = record_keys
+        target_url = 's3://mybucket/path/to/dir'
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        here = os.path.dirname(__file__)
+        from van.static.cdn import _PutS3
+        putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret', encodings=['gzip'])
+        putter.put(_iter_to_dict([
+            ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
+            ('tests/example/images/example.jpg', here + '/example/images/example.jpg', 'van.static', dist, 'file'),
+            ]))
+        css_key, css_gz_key, jpg_key, jpg_gz_key = keys
+        self.assertEqual(
+                css_key.key,
+                '/path/to/dir/van.static/%s/tests/example/css/example.css' % dist.version)
+        css_key.set_contents_from_filename.assert_called_once_with(
+                here + '/example/css/example.css',
+                reduced_redundancy=True,
+                headers={'Cache-Control': 'max-age=32140800'},
+                policy='public-read')
+        self.assertEqual(
+                css_gz_key.key,
+                '/path/to/dir/van.static/%s/gzip/tests/example/css/example.css' % dist.version)
+        args, kw = css_gz_key.set_contents_from_filename.call_args
+        # the file uploaded was a gzipped version of the CSS
+        self.assertNotEqual(here + '/example/css/example.css', args[0])
+        import gzip
+        f = open(args[0], 'rb')
+        try:
+            file_contents = f.read()
+            f.seek(0)
+            decoded_css = gzip.GzipFile('', 'r', fileobj=f).read()
+        finally:
+            f.close()
+        self.assertTrue(file_contents.startswith(b('\x1f\x8b'))) # gzip magic number
+        self.assertEqual(decoded_css.decode('ascii'), '.example {\n\twidth: 80px\n}\n')
+        self.assertEqual(kw, dict(
+                reduced_redundancy=True,
+                headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Encoding': 'gzip'},
+                policy='public-read'))
+        self.assertEqual(
+                jpg_key.key,
+                '/path/to/dir/van.static/%s/tests/example/images/example.jpg' % dist.version)
+        jpg_key.set_contents_from_filename.assert_called_once_with(
+                here + '/example/images/example.jpg',
+                reduced_redundancy=True,
+                headers={'Cache-Control': 'max-age=32140800'},
+                policy='public-read')
+        # the jpeg was re-uploaded to the gzip prefixed url but NOT compressed
+        self.assertEqual(
+                jpg_gz_key.key,
+                '/path/to/dir/van.static/%s/gzip/tests/example/images/example.jpg' % dist.version)
+        jpg_gz_key.set_contents_from_filename.assert_called_once_with(
+                here + '/example/images/example.jpg',
+                reduced_redundancy=True,
+                headers={'Cache-Control': 'max-age=32140800'},
+                policy='public-read')
+        putter.close()
 
 class TestYUICompressor(TestCase):
 
@@ -533,7 +634,7 @@ class TestFunctional(TestCase):
         d = os.path.join(d, 'tests')
         self.assertEqual(os.listdir(d), ['example'])
         d = os.path.join(d, 'example')
-        self.assertEqual(sorted(os.listdir(d)), ['css', 'example.txt', 'js'])
+        self.assertEqual(sorted(os.listdir(d)), ['css', 'example.txt', 'images', 'js'])
         f = open(os.path.join(d, 'example.txt'), 'r')
         self.assertEqual(
                 f.read(),
