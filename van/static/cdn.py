@@ -405,6 +405,7 @@ class _PutS3:
             self._tmpdir = None
 
     def put(self, files):
+        logging.info("S3: putting resources to bucket %s with encodings: %s", self._bucket_name, self._encodings)
         Key = self._get_key_class()
         bucket = self._bucket
         encodings = [None] + list(self._encodings)
