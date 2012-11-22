@@ -146,7 +146,7 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
             ignore_stamps=options.ignore_stamps,
             **kw)
 
-def _never_exists(dist, path):
+def _never_has_stamp(dist, path):
     return False
 
 def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
@@ -155,10 +155,10 @@ def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
     try:
         stamps = mkdtemp()
         try:
-            exists = _never_exists
+            has_stamp = _never_has_stamp
             if not ignore_stamps:
-                exists = putter.exists
-            r_files = _walk_resources(resources, exists, stamps)
+                has_stamp = putter.has_stamp
+            r_files = _walk_resources(resources, has_stamp, stamps)
             comp = None
             try:
                 if yui_compressor:
@@ -229,17 +229,11 @@ def _walk_resource_directory(pname, resource_directory):
             yield r_path, 'file'
 
 
-def _walk_resources(resources, exists, tmpdir):
-    stamp_dist = get_distribution('van.static')
+def _walk_resources(resources, has_stamp, tmpdir):
     for res in resources:
         pname, r_path = res.split(':', 1)
         dist = get_distribution(pname)
-        if _PY3:
-            r_path32 = base64.b32encode(r_path.encode('utf-8')).decode('ascii')
-        else:
-            r_path32 = base64.b32encode(r_path)
-        stamp_path = '%s-%s-%s.stamp' % (dist.project_name, dist.version, r_path32)
-        if exists(stamp_dist, stamp_path):
+        if has_stamp(dist, r_path):
             logging.info("Stamp found, skipping %s:%s", pname, r_path)
             continue
         logging.info("Walking %s:%s", pname, r_path)
@@ -247,14 +241,25 @@ def _walk_resources(resources, exists, tmpdir):
         for r, type in resources:
             fs_r = resource_filename(pname, r)
             yield _to_dict(r, fs_r, pname, dist, type)
-        fs_r = os.path.join(tmpdir, stamp_path)
-        f = open(fs_r, 'w')
+        handle, fs_r = mkstemp(dir=tmpdir)
+        f = os.fdopen(handle, 'w')
         try:
             f.write('Stamping %s' % res)
         finally:
             f.close()
-        yield _to_dict(stamp_path, fs_r, 'van.static', stamp_dist, 'file')
+        yield _to_dict(r_path, fs_r, pname, dist, 'stamp')
 
+def _stamp_resource(dist, resource_path, encodings=None):
+    _stamp_dist = get_distribution('van.static')
+    r_path = resource_path
+    if _PY3:
+        r_path32 = base64.b32encode(r_path.encode('utf-8')).decode('ascii')
+    else:
+        r_path32 = base64.b32encode(r_path)
+    if not encodings:
+        return _stamp_dist, '%s-%s-%s.stamp' % (dist.project_name, dist.version, r_path32)
+    encodings = '-'.join(sorted(encodings))
+    return _stamp_dist, '%s-%s-%s-%s.stamp' % (dist.project_name, dist.version, encodings, r_path32)
 
 class _PutLocal:
 
@@ -278,6 +283,10 @@ class _PutLocal:
             if e.errno != 17:
                 raise
 
+    def has_stamp(self, dist, resource_path):
+        stamp_dist, stamp_path = _stamp_resource(dist, resource_path)
+        return self.exists(stamp_dist, stamp_path)
+
     def exists(self, dist, path):
         target = os.path.join(self._target_dir, dist.project_name,
                               dist.version, path)
@@ -291,6 +300,9 @@ class _PutLocal:
             pname = f['distribution_name']
             dist = f['distribution']
             type = f['type']
+            if type == 'stamp':
+                dist, rpath = _stamp_resource(dist, rpath)
+                type = 'file'
             fs_path = rpath.replace('/', os.sep)  # enough for windows?
             target = os.path.join(self._target_dir, dist.project_name,
                                   dist.version, fs_path)
@@ -363,6 +375,10 @@ class _PutS3:
             self._cached_bucket = conn.get_bucket(self._bucket_name, validate=False)
         return self._cached_bucket
 
+    def has_stamp(self, dist, resource_path):
+        stamp_dist, stamp_path = _stamp_resource(dist, resource_path, encodings=self._encodings)
+        return self.exists(stamp_dist, stamp_path)
+
     def exists(self, dist, path):
         target = '/'.join([self._path, dist.project_name, dist.version,
                            path])
@@ -394,6 +410,17 @@ class _PutS3:
         encodings = [None] + list(self._encodings)
         for f in files:
             if f['type'] == 'dir':
+                continue
+            elif f['type'] == 'stamp':
+                dist, rpath = _stamp_resource(f['distribution'], f['resource_path'])
+                target = '/'.join([self._path, dist.project_name, dist.version, rpath])
+                logging.info("Stamping resource %s:%s in S3: %s", f['distribution_name'], f['resource_path'], target)
+                key = Key(bucket)
+                key.key = target
+                key.set_contents_from_filename(
+                        f['filesystem_path'],
+                        reduced_redundancy=True,
+                        policy='public-read')
                 continue
             dist = f['distribution']
             prefix = '/'.join([self._path, dist.project_name, dist.version])

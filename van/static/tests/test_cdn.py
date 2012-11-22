@@ -17,7 +17,9 @@ else:
 def _iter_to_dict(i):
     from van.static.cdn import _to_dict
     for e in i:
-        yield _to_dict(*e)
+        if not isinstance(e, dict):
+            e = _to_dict(*e)
+        yield e
 
 class TestExtractCmd(TestCase):
 
@@ -121,9 +123,9 @@ class TestExtract(TestCase):
     @patch("van.static.cdn._walk_resources")
     def test_no_comp(self, walk_resources, comp, putter, mkdtemp):
         mkdtemp.return_value = tmpdir = tempfile.mkdtemp()
-        from van.static.cdn import extract, _never_exists
+        from van.static.cdn import extract, _never_has_stamp
         extract(['r1', 'r2'], 'file:///path/to/local', False, ignore_stamps=True, another_kw=1)
-        walk_resources.assert_called_once_with(['r1', 'r2'], _never_exists, tmpdir)
+        walk_resources.assert_called_once_with(['r1', 'r2'], _never_has_stamp, tmpdir)
         putter.assert_called_once_with('file:///path/to/local', another_kw=1)
         putter().put.assert_called_once_with(walk_resources())
         self.assertFalse(comp.called)
@@ -138,9 +140,9 @@ class TestExtract(TestCase):
     @patch("van.static.cdn._walk_resources")
     def test_comp(self, walk_resources, comp, putter, mkdtemp):
         mkdtemp.return_value = tmpdir = tempfile.mkdtemp()
-        from van.static.cdn import extract, _never_exists
+        from van.static.cdn import extract, _never_has_stamp
         extract(['r1', 'r2'], 'file:///path/to/local', True, ignore_stamps=True, another_kw=1)
-        walk_resources.assert_called_once_with(['r1', 'r2'], _never_exists, tmpdir)
+        walk_resources.assert_called_once_with(['r1', 'r2'], _never_has_stamp, tmpdir)
         # comp was called
         comp.assert_called_once_with()
         comp().compress.assert_called_once_with(walk_resources())
@@ -159,7 +161,7 @@ class TestExtract(TestCase):
         mkdtemp.return_value = tmpdir = tempfile.mkdtemp()
         from van.static.cdn import extract
         extract(['r1', 'r2'], 'file:///path/to/local', False, another_kw=1)
-        walk_resources.assert_called_once_with(['r1', 'r2'], putter().exists, tmpdir)
+        walk_resources.assert_called_once_with(['r1', 'r2'], putter().has_stamp, tmpdir)
         putter().put.assert_called_once_with(walk_resources())
         # the temporary directory was removed
         self.assertFalse(os.path.exists(tmpdir))
@@ -281,21 +283,27 @@ class TestWalkResources(TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir)
 
-    def test_walk(self):
+    @patch('van.static.cdn.mkstemp')
+    def test_walk(self, mkstemp):
         from van.static.cdn import _walk_resources
-        exists = Mock()
-        exists.return_value = False
+        from tempfile import mkstemp as real_mkstemp
+        temp_files = []
+        def record_temp_files(*args, **kw):
+            handle, filename = real_mkstemp(*args, **kw)
+            temp_files.append(filename)
+            return handle, filename
+        mkstemp.side_effect = record_temp_files
+        has_stamp = Mock()
+        has_stamp.return_value = False
         i = _walk_resources([
             'van.static:tests/example',
-            'van.static:tests/example/js'], exists, self.tmpdir)
+            'van.static:tests/example/js'], has_stamp, self.tmpdir)
+        i = list(i)
         from pkg_resources import get_distribution
         dist = get_distribution('van.static')
         here = os.path.dirname(__file__)
-        stamp_file1 = 'van.static-%s-ORSXG5DTF5SXQYLNOBWGK===.stamp' % dist.version
-        stamp_path1 = os.path.join(self.tmpdir, stamp_file1)
-        stamp_file2 = 'van.static-%s-ORSXG5DTF5SXQYLNOBWGKL3KOM======.stamp' % dist.version
-        stamp_path2 = os.path.join(self.tmpdir, stamp_file2)
-        self.assertEqual(list(i), list(_iter_to_dict([
+        stamp_path1, stamp_path2 = temp_files
+        self.assertEqual(i, list(_iter_to_dict([
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
@@ -304,11 +312,15 @@ class TestWalkResources(TestCase):
             ('tests/example/images/example.jpg', here + '/example/images/example.jpg', 'van.static', dist, 'file'),
             ('tests/example/js', here + '/example/js', 'van.static', dist, 'dir'),
             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
-            (stamp_file1, stamp_path1, 'van.static', dist, 'file'),
+            dict(resource_path='tests/example',
+                filesystem_path=stamp_path1,
+                distribution_name='van.static',
+                distribution=dist,
+                type='stamp'),
             # the duplicate of js is from the declaration of 'van.static:tests/example/js'
             ('tests/example/js', here + '/example/js', 'van.static', dist, 'dir'),
             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
-            (stamp_file2, stamp_path2, 'van.static', dist, 'file'),
+            ('tests/example/js', stamp_path2, 'van.static', dist, 'stamp'),
             ])))
 
 
@@ -451,6 +463,30 @@ class TestPutS3(TestCase):
         self.assertTrue(putter.exists(dist, 'whatever/wherever'))
         putter.close()
 
+    @patch("van.static.cdn._PutS3.exists")
+    def test_has_stamp(self, exists):
+        from pkg_resources import get_distribution
+        from van.static.cdn import _PutS3
+        target_url = 's3://mybucket/path/to/dir'
+        putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret')
+        dist = get_distribution('pyramid')
+        stamp_dist = get_distribution('van.static')
+        putter.has_stamp(dist, 'static')
+        exists.assert_called_once_with(stamp_dist, 'pyramid-%s-ON2GC5DJMM======.stamp' % dist.version)
+        putter.close()
+
+    @patch("van.static.cdn._PutS3.exists")
+    def test_has_stamp_with_encodings(self, exists):
+        from pkg_resources import get_distribution
+        from van.static.cdn import _PutS3
+        target_url = 's3://mybucket/path/to/dir'
+        putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret', encodings=['gzip', 'deflate'])
+        dist = get_distribution('pyramid')
+        stamp_dist = get_distribution('van.static')
+        putter.has_stamp(dist, 'static')
+        exists.assert_called_once_with(stamp_dist, 'pyramid-%s-deflate-gzip-ON2GC5DJMM======.stamp' % dist.version)
+        putter.close()
+
     @patch("van.static.cdn._PutS3._get_key_class")
     @patch("van.static.cdn._PutS3._get_conn_class")
     def test_put(self, conn_class, key_class):
@@ -540,9 +576,11 @@ class TestPutS3(TestCase):
         try:
             file_contents = f.read()
             f.seek(0)
-            decoded_css = gzip.GzipFile('', 'r', fileobj=f).read()
+            gz_f = gzip.GzipFile('', 'r', fileobj=f)
+            decoded_css = gz_f.read()
         finally:
             f.close()
+            gz_f.close()
         self.assertTrue(file_contents.startswith(b('\x1f\x8b'))) # gzip magic number
         self.assertEqual(decoded_css.decode('ascii'), '.example {\n\twidth: 80px\n}\n')
         self.assertEqual(kw, dict(
@@ -567,6 +605,47 @@ class TestPutS3(TestCase):
                 reduced_redundancy=True,
                 headers={'Cache-Control': 'max-age=32140800'},
                 policy='public-read')
+        putter.close()
+
+    @patch("van.static.cdn._PutS3._get_key_class")
+    @patch("van.static.cdn._PutS3._get_conn_class")
+    def test_put_stamp(self, conn_class, key_class):
+        from pkg_resources import get_distribution
+        from van.static.cdn import _PutS3
+        keys = []
+        def record_keys(bucket):
+            mock = Mock()
+            keys.append(mock)
+            return mock
+        key_class().side_effect = record_keys
+        target_url = 's3://mybucket/path/to/dir'
+        putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret')
+        dist = get_distribution('pyramid')
+        from tempfile import mkstemp
+        f, tempfile = mkstemp()
+        f = os.fdopen(f, 'w')
+        f.write('Stomped')
+        f.close()
+        putter.put(_iter_to_dict([
+            ('static', tempfile, 'pyramid', dist, 'stamp'),
+            ]))
+        stamp_dist = get_distribution('van.static')
+        stamp_key,  = keys
+        self.assertEqual(
+                stamp_key.key,
+                '/path/to/dir/van.static/%s/pyramid-%s-ON2GC5DJMM======.stamp' % 
+                (stamp_dist.version, dist.version))
+        args, kw = stamp_key.set_contents_from_filename.call_args
+        # the file uploaded was a gzipped version of the CSS
+        f = open(args[0], 'r')
+        try:
+            file_contents = f.read()
+        finally:
+            f.close()
+        self.assertEqual(file_contents, 'Stomped')
+        self.assertEqual(kw, dict(
+                reduced_redundancy=True,
+                policy='public-read'))
         putter.close()
 
 class TestYUICompressor(TestCase):
