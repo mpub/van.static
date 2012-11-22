@@ -75,6 +75,36 @@ for the system administrator to run on deployment. Likewise the
 ``cdn_url`` configuration option is set by the system administrator to
 the url where the files were exported to.
 
+GZip Content-Encoding compression
++++++++++++++++++++++++++++++++++
+
+Compressing resources during extraction is supported for the S3 target.
+S3+Cloudfront does not directly support on the fly compression at this
+time so a workaround is used where multiple copies of resources are
+uploaded. One without any encoding and the others with encodings.
+
+The links to resources should then be generated to compressed or
+non-compressed resources depending on the capabilities of the browser.
+
+An example of how to modify the resource generation in a pyramid
+application is::
+
+    >>> class ZippingPyramidRequest(Request):
+    ...
+    ...     def static_url(self, path, **kw):
+    ...         if 'gzip' in self.accept_encoding:
+    ...             package, path = path.split(':', 1)
+    ...             path = '{package}:gzip/{path}'.format(
+    ...                     package=package,
+    ...                     path=path)
+    ...         return Request.static_url(self, path, **kw)
+
+The extractor is configured to upload resources with the gzip encoding
+with the --encoding parameter.
+
+WARNING: The `Vary` HTTP will need to contain `Accept-Encoding` to play
+well with any caches.
+
 APT integration
 +++++++++++++++
 
