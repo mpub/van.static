@@ -394,8 +394,8 @@ class _PutS3:
         from boto.s3.key import Key
         return Key
 
-    def _should_gzip(self, filename):
-        return mimetypes.guess_type(filename)[0] in _GZ_MIMETYPES
+    def _should_gzip(self, mimetype):
+        return mimetype in _GZ_MIMETYPES
 
     def close(self):
         if self._tmpdir is not None:
@@ -425,16 +425,18 @@ class _PutS3:
                 continue
             dist = f['distribution']
             prefix = '/'.join([self._path, dist.project_name, dist.version])
+            filename = f['resource_path'].split('/')[-1]
+            mimetype = mimetypes.guess_type(filename)[0]
             for enc in encodings:
                 headers = {'Cache-Control': 'max-age=32140800'}
+                if mimetype:
+                    headers['Content-Type'] = mimetype
                 if enc is None:
                     target = '/'.join([prefix, f['resource_path']])
                     fs_path = f['filesystem_path']
                 elif enc == 'gzip':
-
                     target = '/'.join([prefix, enc, f['resource_path']])
-                    filename = f['resource_path'].split('/')[-1]
-                    if self._should_gzip(filename):
+                    if self._should_gzip(mimetype):
                         headers['Content-Encoding'] = 'gzip'
                         source = f['filesystem_path']
                         c_file, fs_path = self._get_temp_file()

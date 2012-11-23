@@ -525,7 +525,8 @@ class TestPutS3(TestCase):
         css_key.set_contents_from_filename.assert_called_once_with(
                 here + '/example/css/example.css',
                 reduced_redundancy=True,
-                headers={'Cache-Control': 'max-age=32140800'},
+                headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Type': 'text/css'},
                 policy='public-read')
         self.assertEqual(
                 txt_key.key,
@@ -533,7 +534,8 @@ class TestPutS3(TestCase):
         txt_key.set_contents_from_filename.assert_called_once_with(
                 here + '/example/example.txt',
                 reduced_redundancy=True,
-                headers={'Cache-Control': 'max-age=32140800'},
+                headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Type': 'text/plain'},
                 policy='public-read')
         putter.close()
 
@@ -563,7 +565,8 @@ class TestPutS3(TestCase):
         css_key.set_contents_from_filename.assert_called_once_with(
                 here + '/example/css/example.css',
                 reduced_redundancy=True,
-                headers={'Cache-Control': 'max-age=32140800'},
+                headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Type': 'text/css'},
                 policy='public-read')
         self.assertEqual(
                 css_gz_key.key,
@@ -586,6 +589,7 @@ class TestPutS3(TestCase):
         self.assertEqual(kw, dict(
                 reduced_redundancy=True,
                 headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Type': 'text/css',
                     'Content-Encoding': 'gzip'},
                 policy='public-read'))
         self.assertEqual(
@@ -594,7 +598,8 @@ class TestPutS3(TestCase):
         jpg_key.set_contents_from_filename.assert_called_once_with(
                 here + '/example/images/example.jpg',
                 reduced_redundancy=True,
-                headers={'Cache-Control': 'max-age=32140800'},
+                headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Type': 'image/jpeg'},
                 policy='public-read')
         # the jpeg was re-uploaded to the gzip prefixed url but NOT compressed
         self.assertEqual(
@@ -603,7 +608,8 @@ class TestPutS3(TestCase):
         jpg_gz_key.set_contents_from_filename.assert_called_once_with(
                 here + '/example/images/example.jpg',
                 reduced_redundancy=True,
-                headers={'Cache-Control': 'max-age=32140800'},
+                headers={'Cache-Control': 'max-age=32140800',
+                    'Content-Type': 'image/jpeg'},
                 policy='public-read')
         putter.close()
 
