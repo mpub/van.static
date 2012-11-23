@@ -89,6 +89,7 @@ non-compressed resources depending on the capabilities of the browser.
 An example of how to modify the resource generation in a pyramid
 application is::
 
+    >>> from pyramid.request import Request
     >>> class ZippingPyramidRequest(Request):
     ...
     ...     def static_url(self, path, **kw):
