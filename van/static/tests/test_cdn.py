@@ -618,12 +618,6 @@ class TestPutS3(TestCase):
     def test_put_stamp(self, conn_class, key_class):
         from pkg_resources import get_distribution
         from van.static.cdn import _PutS3
-        keys = []
-        def record_keys(bucket):
-            mock = Mock()
-            keys.append(mock)
-            return mock
-        key_class().side_effect = record_keys
         target_url = 's3://mybucket/path/to/dir'
         putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret')
         dist = get_distribution('pyramid')
@@ -636,13 +630,13 @@ class TestPutS3(TestCase):
             ('static', tempfile, 'pyramid', dist, 'stamp'),
             ]))
         stamp_dist = get_distribution('van.static')
-        stamp_key,  = keys
+        stamp_key  = key_class()()
         self.assertEqual(
                 stamp_key.key,
-                '/path/to/dir/van.static/%s/pyramid-%s-ON2GC5DJMM======.stamp' % 
+                '/path/to/dir/van.static/%s/pyramid-%s-ON2GC5DJMM======.stamp' %
                 (stamp_dist.version, dist.version))
         args, kw = stamp_key.set_contents_from_filename.call_args
-        # the file uploaded was a gzipped version of the CSS
+        # the file uploaded was the stamp
         f = open(args[0], 'r')
         try:
             file_contents = f.read()
@@ -653,6 +647,7 @@ class TestPutS3(TestCase):
                 reduced_redundancy=True,
                 policy='public-read'))
         putter.close()
+        os.remove(tempfile)
 
 class TestYUICompressor(TestCase):
 
