@@ -649,6 +649,31 @@ class TestPutS3(TestCase):
         putter.close()
         os.remove(tempfile)
 
+    @patch("van.static.cdn._PutS3._get_key_class")
+    @patch("van.static.cdn._PutS3._get_conn_class")
+    def test_put_stamp_with_encoding(self, conn_class, key_class):
+        from pkg_resources import get_distribution
+        from van.static.cdn import _PutS3
+        target_url = 's3://mybucket/path/to/dir'
+        putter = _PutS3(target_url, aws_access_key='key', aws_secret_key='secret', encodings=['gzip'])
+        dist = get_distribution('pyramid')
+        from tempfile import mkstemp
+        f, tempfile = mkstemp()
+        f = os.fdopen(f, 'w')
+        f.write('Stomped')
+        f.close()
+        putter.put(_iter_to_dict([
+            ('static', tempfile, 'pyramid', dist, 'stamp'),
+            ]))
+        stamp_dist = get_distribution('van.static')
+        stamp_key  = key_class()()
+        self.assertEqual(
+                stamp_key.key,
+                '/path/to/dir/van.static/%s/pyramid-%s-gzip-ON2GC5DJMM======.stamp' %
+                (stamp_dist.version, dist.version))
+        os.remove(tempfile)
+
+
 class TestYUICompressor(TestCase):
 
     def setUp(self):

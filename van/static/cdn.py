@@ -413,7 +413,7 @@ class _PutS3:
             if f['type'] == 'dir':
                 continue
             elif f['type'] == 'stamp':
-                dist, rpath = _stamp_resource(f['distribution'], f['resource_path'])
+                dist, rpath = _stamp_resource(f['distribution'], f['resource_path'], encodings=self._encodings)
                 target = '/'.join([self._path, dist.project_name, dist.version, rpath])
                 logging.info("Stamping resource %s:%s in S3: %s", f['distribution_name'], f['resource_path'], target)
                 key = Key(bucket)
