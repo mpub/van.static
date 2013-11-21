@@ -490,6 +490,8 @@ class _YUICompressor:
             self._tmpdir = None
 
     def __del__(self):
+        if self._tmpdir is not None:
+            raise Exception('%s was not disposed before garbage collection' % self)
         self.dispose()
 
     def compress(self, files):
