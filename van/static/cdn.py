@@ -495,25 +495,24 @@ class _YUICompressor:
     def compress(self, files):
         for f in files:
             rpath = f['resource_path']
-            fs_rpath = f['filesystem_path']
-            pname = f['distribution_name']
-            dist = f['distribution']
             f_type = f['type']
             if f_type == 'file' and rpath.endswith('.js'):
                 type = 'js'
             elif f_type == 'file' and rpath.endswith('.css'):
                 type = 'css'
             else:
-                yield _to_dict(rpath, fs_rpath, pname, dist, f_type)
+                yield f
                 continue
             self._counter += 1
+            fs_rpath = f['filesystem_path']
             target = os.path.join(self._tmpdir, str(self._counter) + '-' +
                                                 os.path.basename(fs_rpath))
             args = ['yui-compressor', '--type', type, '-o', target, fs_rpath]
             logging.debug('Compressing with YUI Compressor %s file, '
                           'from %s to %s', type, fs_rpath, target)
             subprocess.check_call(args)
-            yield _to_dict(rpath, target, pname, dist, f_type)
+            f['filesystem_path'] = target
+            yield f
 
 if __name__ == "__main__":
     extract_cmd()
