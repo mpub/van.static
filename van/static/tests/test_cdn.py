@@ -145,11 +145,11 @@ class TestExtract(TestCase):
         walk_resources.assert_called_once_with(['r1', 'r2'], _never_has_stamp, tmpdir)
         # comp was called
         comp.assert_called_once_with()
-        comp().compress.assert_called_once_with(walk_resources())
+        comp().process.assert_called_once_with(walk_resources())
         comp().dispose.assert_called_once_with()
         # and putter with the result of comp
         putter.assert_called_once_with('file:///path/to/local', another_kw=1)
-        putter().put.assert_called_once_with(comp().compress())
+        putter().put.assert_called_once_with(comp().process())
         # the temporary directory was removed
         self.assertFalse(os.path.exists(tmpdir))
 
@@ -692,7 +692,7 @@ class TestYUICompressor(TestCase):
         input = list(_iter_to_dict(
             [('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
              ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file')]))
-        self.assertEqual(list(self.one.compress(iter(input))), input)
+        self.assertEqual(list(self.one.process(iter(input))), input)
         self.assertFalse(subprocess.check_call.called)
 
     @patch('van.static.cdn.subprocess')
@@ -705,7 +705,7 @@ class TestYUICompressor(TestCase):
                  ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file')]))
         out = list(_iter_to_dict([('tests/example/css/example.css', self.one._tmpdir + '/1-example.css', 'van.static', dist, 'file'),
                ('tests/example/js/example.js', self.one._tmpdir + '/2-example.js', 'van.static', dist, 'file')]))
-        self.assertEqual(list(self.one.compress(iter(input))), out)
+        self.assertEqual(list(self.one.process(iter(input))), out)
         self.assertEqual(subprocess.check_call.call_args_list, [
             ((['yui-compressor', '--type', 'css', '-o', self.one._tmpdir + '/1-example.css', here + '/example/css/example.css'], ), ),
             ((['yui-compressor', '--type', 'js', '-o', self.one._tmpdir + '/2-example.js', here + '/example/js/example.js'], ), )])

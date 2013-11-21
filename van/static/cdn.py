@@ -159,15 +159,21 @@ def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
             if not ignore_stamps:
                 has_stamp = putter.has_stamp
             r_files = _walk_resources(resources, has_stamp, stamps)
-            comp = None
+            pipeline = []
             try:
+                # construct pipeline from config
+                # in the right order
                 if yui_compressor:
-                    comp = _YUICompressor()
-                    r_files = comp.compress(r_files)
+                    pipeline.append(_YUICompressor())
+                # build iterator out of pipelines
+                for p in pipeline:
+                    r_files = p.process(r_files)
+                # execute pipeline
                 putter.put(r_files)
             finally:
-                if comp is not None:
-                    comp.dispose()
+                # dispose all bits of the pipeline to clean temporary files
+                for p in pipeline:
+                    p.dispose()
         finally:
             shutil.rmtree(stamps)
     finally:
@@ -494,7 +500,7 @@ class _YUICompressor:
             raise Exception('%s was not disposed before garbage collection' % self)
         self.dispose()
 
-    def compress(self, files):
+    def process(self, files):
         for f in files:
             rpath = f['resource_path']
             f_type = f['type']
