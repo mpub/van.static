@@ -10,6 +10,11 @@ import subprocess
 from tempfile import mkdtemp, mkstemp
 
 try:
+    import cssutils
+except ImportError:
+    cssutils = None
+
+try:
     from urllib.parse import urlparse
 except ImportError:
     #python 2
@@ -88,6 +93,15 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
     parser.add_option("--no-yui-compressor", dest="yui_compressor",
                       action="store_false",
                       help="Do not compress the files with yui-compressor")
+    parser.add_option("--cssutils-minify", dest="cssutils_minify",
+                      action="store_true",
+                      help=("Use the python cssutils package to minify the"
+                            "CSS"))
+    parser.add_option("--cssutils-resolve-imports",
+                      dest="cssutils_resolve_imports",
+                      action="store_true",
+                      help=("Use the python cssutils package to resolve"
+                            "@import statements in the CSS"))
     parser.add_option("--target", dest="target",
                       help=("Where to put the resources (can be the name of a "
                             "local directory, or a url on S3 "
@@ -118,6 +132,8 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
     parser.set_defaults(
             yui_compressor=yui_compressor,
             target=target,
+            cssutils_resolve_imports=None,
+            cssutils_minify=None,
             ignore_stamps=ignore_stamps)
     options, args = parser.parse_args(args)
     if not options.encodings:
@@ -133,12 +149,14 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
     if not options.resources:
         raise AssertionError("Resources are required")
     kw = {}
-    if options.aws_access_key:
-        kw['aws_access_key'] = options.aws_access_key
-    if options.aws_secret_key:
-        kw['aws_secret_key'] = options.aws_secret_key
-    if options.encodings:
-        kw['encodings'] = options.encodings
+    for opt in ['aws_access_key',
+            'aws_secret_key',
+            'encodings',
+            'cssutils_minify',
+            'cssutils_resolve_imports']:
+        v = getattr(options, opt, None)
+        if v is not None:
+            kw[opt] = v
     assert len(args) == 1, args
     extract(options.resources,
             options.target,
@@ -149,7 +167,10 @@ def extract_cmd(resources=None, target=None, yui_compressor=False,
 def _never_has_stamp(dist, path):
     return False
 
-def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
+def extract(resources, target, yui_compressor=True, ignore_stamps=False,
+        cssutils_resolve_imports=False,
+        cssutils_minify=False,
+        **kw):
     """Export the resources"""
     putter = _get_putter(target, **kw)
     try:
@@ -163,6 +184,10 @@ def extract(resources, target, yui_compressor=True, ignore_stamps=False, **kw):
             try:
                 # construct pipeline from config
                 # in the right order
+                if cssutils_resolve_imports or cssutils_minify:
+                    pipeline.append(_CSSUtils(
+                        resolve_imports=cssutils_resolve_imports,
+                        minify=cssutils_minify))
                 if yui_compressor:
                     pipeline.append(_YUICompressor())
                 # build iterator out of pipelines
@@ -521,6 +546,53 @@ class _YUICompressor:
             subprocess.check_call(args)
             f['filesystem_path'] = target
             yield f
+
+class _CSSUtils:
+    """Filter to inline CSS @import statements"""
+
+    def __init__(self, resolve_imports=False, minify=False):
+        if cssutils is None:
+            import cssutils as err # cssutils needs to be installed
+        self._tmpdir = mkdtemp()
+        self._counter = 0
+        self.serializer = cssutils.CSSSerializer()
+        self.resolve_imports = resolve_imports
+        if minify:
+            self.serializer.prefs.useMinified()
+
+    def dispose(self):
+        if self._tmpdir is not None:
+            logging.debug("_CSSImportInliner: removing temp workspace: %s",
+                          self._tmpdir)
+            shutil.rmtree(self._tmpdir)
+            self._tmpdir = None
+
+    def process(self, files):
+        for f in files:
+            if not f['resource_path'].endswith('.css') or f['type'] != 'file':
+                yield f
+                continue
+            self._counter += 1
+            fs_rpath = f['filesystem_path']
+            sheet = cssutils.parseFile(fs_rpath)
+            sheet.setSerializer(self.serializer)
+            for url in cssutils.getUrls(sheet):
+                u = urlparse(url)
+                if u.scheme or u.netloc or not u.path.startswith('./'):
+                    logging.warning('non-relative URL used in CSS: %s' % url)
+            if self.resolve_imports:
+                sheet = cssutils.resolveImports(sheet)
+            target = os.path.join(
+                    self._tmpdir,
+                    str(self._counter) + '-' + os.path.basename(fs_rpath))
+            out_f = open(target, 'wb')
+            try:
+                out_f.write(sheet.cssText)
+            finally:
+                out_f.close()
+            f['filesystem_path'] = target
+            yield f
+
 
 if __name__ == "__main__":
     extract_cmd()

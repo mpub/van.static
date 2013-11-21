@@ -67,6 +67,8 @@ class TestExtractCmd(TestCase):
                     '--resource', 'van.static.tests:static',
                     '--target', 's3:///somewhere_else',
                     '--resource', 'van.static.tests:another_static',
+                    '--cssutils-minify',
+                    '--cssutils-resolve-imports',
                     '--yui-compressor',
                     '--encoding', 'gzip',
                     '--aws-access-key', '1234',
@@ -80,7 +82,9 @@ class TestExtractCmd(TestCase):
                 encodings=['gzip'],
                 aws_secret_key='12345',
                 aws_access_key='1234',
-                ignore_stamps=False)
+                ignore_stamps=False,
+                cssutils_minify=True,
+                cssutils_resolve_imports=True)
         logging.basicConfig.assert_called_once_with(level=logging.DEBUG)
         logging.reset_mock()
         extract.reset_mock()
@@ -152,6 +156,19 @@ class TestExtract(TestCase):
         putter().put.assert_called_once_with(comp().process())
         # the temporary directory was removed
         self.assertFalse(os.path.exists(tmpdir))
+
+    @patch("van.static.cdn._get_putter")
+    @patch("van.static.cdn._CSSUtils")
+    @patch("van.static.cdn._walk_resources")
+    def test_cssutils(self, walk_resources, _CSSUtils, putter):
+        from van.static.cdn import extract
+        extract(['r1', 'r2'], 'file:///path/to/local', yui_compressor=False, ignore_stamps=True, cssutils_minify=True)
+        # comp was called
+        _CSSUtils.assert_called_once_with(resolve_imports=False, minify=True)
+        _CSSUtils().process.assert_called_once_with(walk_resources())
+        _CSSUtils().dispose.assert_called_once_with()
+        # and putter with the result of _CSSUtils
+        putter().put.assert_called_once_with(_CSSUtils().process())
 
     @patch("van.static.cdn.mkdtemp")
     @patch("van.static.cdn._get_putter")
@@ -307,6 +324,7 @@ class TestWalkResources(TestCase):
             ('tests/example', here + '/example', 'van.static', dist, 'dir'),
             ('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
             ('tests/example/css/example.css', here + '/example/css/example.css', 'van.static', dist, 'file'),
+            ('tests/example/css/example_imported.css', here + '/example/css/example_imported.css', 'van.static', dist, 'file'),
             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file'),
             ('tests/example/images', here + '/example/images', 'van.static', dist, 'dir'),
             ('tests/example/images/example.jpg', here + '/example/images/example.jpg', 'van.static', dist, 'file'),
@@ -710,6 +728,64 @@ class TestYUICompressor(TestCase):
             ((['yui-compressor', '--type', 'css', '-o', self.one._tmpdir + '/1-example.css', here + '/example/css/example.css'], ), ),
             ((['yui-compressor', '--type', 'js', '-o', self.one._tmpdir + '/2-example.js', here + '/example/js/example.js'], ), )])
 
+class TestCSSUtils(TestCase):
+
+    def setUp(self):
+        self._to_dispose = []
+
+    def one(self, **kw):
+        from van.static.cdn import _CSSUtils
+        one = _CSSUtils(**kw)
+        self._to_dispose.append(one)
+        return one
+
+    def tearDown(self):
+        for one in self._to_dispose:
+            one.dispose()
+
+    def test_uncompressible(self):
+        # directories and non css
+        here = os.path.dirname(__file__)
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        input = list(_iter_to_dict(
+            [('tests/example/css', here + '/example/css', 'van.static', dist, 'dir'),
+             ('tests/example/js/example.js', here + '/example/js/example.js', 'van.static', dist, 'file'),
+             ('tests/example/example.txt', here + '/example/example.txt', 'van.static', dist, 'file')]))
+        one = self.one(minify=True)
+        self.assertEqual(list(one.process(iter(input))), input)
+
+    def test_minify(self):
+        # css files are compressed to a temporary directory
+        one = self.one(minify=True)
+        here = os.path.dirname(__file__)
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        input = list(_iter_to_dict([('tests/example/css/example_imported.css', here + '/example/css/example_imported.css', 'van.static', dist, 'file')]))
+        outfile = one._tmpdir + '/1-example_imported.css'
+        out = list(_iter_to_dict([('tests/example/css/example_imported.css', outfile, 'van.static', dist, 'file')]))
+        self.assertEqual(list(one.process(iter(input))), out)
+        f = open(outfile, 'r')
+        try:
+            self.assertEqual(f.read(), '@import"./example.css";.example-imported{width:80px}')
+        finally:
+            f.close()
+
+    def test_resolve_imports(self):
+        one = self.one(resolve_imports=True, minify=True)
+        here = os.path.dirname(__file__)
+        from pkg_resources import get_distribution
+        dist = get_distribution('van.static')
+        input = list(_iter_to_dict([('tests/example/css/example_imported.css', here + '/example/css/example_imported.css', 'van.static', dist, 'file')]))
+        outfile = one._tmpdir + '/1-example_imported.css'
+        out = list(_iter_to_dict([('tests/example/css/example_imported.css', outfile, 'van.static', dist, 'file')]))
+        self.assertEqual(list(one.process(iter(input))), out)
+        f = open(outfile, 'r')
+        try:
+            self.assertEqual(f.read(), '.example{width:80px}.example-imported{width:80px}')
+        finally:
+            f.close()
+
 class TestFunctional(TestCase):
 
     def setUp(self):
@@ -746,4 +822,4 @@ class TestFunctional(TestCase):
                 'Example Text\n')
         f.close()
         d = os.path.join(d, 'css')
-        self.assertEqual(os.listdir(d), ['example.css'])
+        self.assertEqual(os.listdir(d), ['example.css', 'example_imported.css'])

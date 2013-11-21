@@ -1,0 +1,5 @@
+@import url('./example.css');
+.example-imported {
+	width: 80px
+}
+
