@@ -71,7 +71,7 @@ def _start_jslint(path, exc):
 
 def _check_running(running):
     messages = []
-    for file, p in running.items():
+    for file, p in list(running.items()):
         p, output = p
         ret = p.poll()
         if ret is not None:
