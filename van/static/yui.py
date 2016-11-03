@@ -38,6 +38,7 @@ def find_modules(resource, reload=False, fail_onerror=True):
         for l in lines:
             if not l.strip():
                 continue
+            l = l.decode('utf-8')
             requires = _extract_requires(l)
             if requires is None:
                 msg = "could not find requires in %s:%s, last line was: %s" % (pname, filepath, l)
