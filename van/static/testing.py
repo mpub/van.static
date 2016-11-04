@@ -54,7 +54,7 @@ def jslint_dir(path, failfast, jslint='jslint'):
             running.values()[0][0].wait()
         messages.extend(_check_running(running))
         assert len(running) <= MAX_PROCS
-    for p, _ in running.values():
+    for p, _ in list(running.values()):
         p.wait()
         messages.extend(_check_running(running))
     return messages, files_checked
